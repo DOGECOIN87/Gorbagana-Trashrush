@@ -1,9 +1,16 @@
+[toolchain]
+anchor_version = "0.32.1"
+solana_version = "1.18.26"
+
 [features]
 seeds = false
 skip-lint = false
 
 [programs.localnet]
-gorbagana_slots = "PutYourProgramIDHere"
+gorbagana_slots = "5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF"
+
+[programs.testnet]
+gorbagana_slots = "5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF"
 
 [registry]
 url = "https://api.apr.dev"

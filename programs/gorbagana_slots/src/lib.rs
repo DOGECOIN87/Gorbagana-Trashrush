@@ -4,7 +4,7 @@ use anchor_spl::{
     token::{self, Mint, Token, TokenAccount, Transfer},
 };
 
-declare_id!("PutYourProgramIDHere");
+declare_id!("5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF");
 
 #[program]
 pub mod gorbagana_slots {

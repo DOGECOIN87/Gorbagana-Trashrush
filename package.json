@@ -20,7 +20,9 @@
     "@solana/wallet-adapter-react-ui": "^0.9.35",
     "@solana/wallet-adapter-wallets": "^0.19.32",
     "@solana/spl-token": "^0.4.6",
-    "buffer": "^6.0.3"
+    "buffer": "^6.0.3",
+    "three": "^0.160.0",
+    "@types/three": "^0.160.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

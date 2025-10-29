@@ -29,11 +29,20 @@ solana config set --url https://rpc.gorbagana.wtf/
 echo "💰 Checking wallet balance..."
 BALANCE=$(solana balance)
 echo "Current balance: $BALANCE"
+echo "Wallet address: $(solana address)"
 
-if [[ "$BALANCE" == "0 SOL" ]]; then
+if [[ "$BALANCE" == "0 GOR" ]]; then
     echo "⚠️  Warning: Your wallet balance is 0. You need GOR tokens to deploy."
     echo "Please fund your wallet with testnet GOR tokens."
+    echo "You can try: solana airdrop 1"
+    echo "Or request tokens from the Gorbagana community."
     exit 1
+fi
+
+# Load environment variables if .env exists
+if [ -f ".env" ]; then
+    echo "📄 Loading environment variables from .env..."
+    export $(cat .env | grep -v '^#' | xargs)
 fi
 
 # Build the program
