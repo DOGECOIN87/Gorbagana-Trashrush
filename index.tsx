@@ -10,12 +10,24 @@
 import React, { useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { BlockchainSlotGame } from './src/components/BlockchainSlotGame.tsx';
+import { DesktopSlotGame } from './src/components/DesktopSlotGame.tsx';
 
 // Demo Application Component
 const App: React.FC = () => {
   const [isConnected, setIsConnected] = useState(false);
-  const [balance, setBalance] = useState(5.0); // Demo balance in SOL
+  const [balance, setBalance] = useState(5.0); // Demo balance in GOR
   const [wallet, setWallet] = useState<any>(null);
+  const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
+
+  // Handle screen size changes
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Demo wallet connection simulation
   const connectWallet = () => {
@@ -62,45 +74,73 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#0a021d]">
-      {/* Wallet Connection UI */}
-      <div className="fixed top-4 right-4 z-50">
-        {isConnected ? (
-          <div className="flex flex-col gap-2">
-            <div className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm">
-              ✅ Connected: Demo Wallet
-            </div>
-            <button
-              onClick={disconnectWallet}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-            >
-              Disconnect
-            </button>
+      {/* Only show overlays for mobile version */}
+      {!isDesktop && (
+        <>
+          {/* Wallet Connection UI */}
+          <div className="fixed top-4 right-4 z-50">
+            {isConnected ? (
+              <div className="flex flex-col gap-2">
+                <div className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm">
+                  ✅ Connected: Demo Wallet
+                </div>
+                <button
+                  onClick={disconnectWallet}
+                  className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+                >
+                  Disconnect
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={connectWallet}
+                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
+              >
+                Connect Demo Wallet
+              </button>
+            )}
           </div>
-        ) : (
-          <button
-            onClick={connectWallet}
-            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm transition-colors"
-          >
-            Connect Demo Wallet
-          </button>
-        )}
-      </div>
 
-      {/* Demo Notice */}
-      <div className="fixed top-4 left-4 z-50 bg-yellow-600/90 text-white px-4 py-2 rounded-lg text-sm max-w-xs">
-        <div className="font-bold">🚧 Demo Mode</div>
-        <div className="text-xs mt-1">
-          This is a demo version. Connect wallet to simulate blockchain interactions.
-        </div>
+          {/* Demo Notice */}
+          <div className="fixed top-4 left-4 z-50 bg-yellow-600/90 text-white px-4 py-2 rounded-lg text-sm max-w-xs">
+            <div className="font-bold">🚧 Demo Mode</div>
+            <div className="text-xs mt-1">
+              This is a demo version. Connect wallet to simulate blockchain interactions.
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Debug indicator */}
+      <div className="fixed bottom-4 left-4 z-50 bg-black/80 text-white px-3 py-1 rounded text-xs">
+        {isDesktop ? '🖥️ Desktop Mode' : '📱 Mobile Mode'} | Width: {window.innerWidth}px
       </div>
 
       {/* Main Game Component */}
-      <BlockchainSlotGame
-        wallet={wallet}
-        onSpin={handleSpin}
-        isConnected={isConnected}
-        balance={balance}
-      />
+      {isDesktop ? (
+        <DesktopSlotGame
+          wallet={wallet}
+          onSpin={handleSpin}
+          isConnected={isConnected}
+          balance={balance}
+          onConnect={connectWallet}
+          onDisconnect={disconnectWallet}
+        >
+          <BlockchainSlotGame
+            wallet={wallet}
+            onSpin={handleSpin}
+            isConnected={isConnected}
+            balance={balance}
+          />
+        </DesktopSlotGame>
+      ) : (
+        <BlockchainSlotGame
+          wallet={wallet}
+          onSpin={handleSpin}
+          isConnected={isConnected}
+          balance={balance}
+        />
+      )}
     </div>
   );
 };

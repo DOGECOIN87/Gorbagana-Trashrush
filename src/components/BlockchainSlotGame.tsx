@@ -25,7 +25,7 @@ interface BlockchainSlotGameProps {
 
 const REEL_ROWS = 3;
 const REEL_COLS = 3;
-const DEFAULT_BET_AMOUNT = 0.01; // 0.01 SOL
+const DEFAULT_BET_AMOUNT = 0.01; // 0.01 GOR
 const SPIN_ANIMATION_DURATION = 1500;
 const SPIN_ANIMATION_INTERVAL = 100;
 
@@ -96,8 +96,8 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   const [showMiniGameResult, setShowMiniGameResult] = useState(false);
 
   // Progressive Jackpot states
-  const [grandJackpot, setGrandJackpot] = useState(10.0); // Starting at 10 SOL
-  const [minorJackpot, setMinorJackpot] = useState(2.5);  // Starting at 2.5 SOL
+  const [grandJackpot, setGrandJackpot] = useState(10.0); // Starting at 10 GOR
+  const [minorJackpot, setMinorJackpot] = useState(2.5);  // Starting at 2.5 GOR
   const [jackpotWon, setJackpotWon] = useState<'grand' | 'minor' | null>(null);
   const [showJackpotWin, setShowJackpotWin] = useState(false);
 
@@ -463,14 +463,14 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   });
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-[#0a021d] text-white p-2 antialiased" style={{ fontFamily: "'Exo 2', sans-serif" }}>
+    <div className="flex items-center justify-center min-h-screen text-white p-2 antialiased" style={{ fontFamily: "'Exo 2', sans-serif" }}>
       <div className="relative w-full max-w-[420px] min-h-[800px] bg-[#000] rounded-[3rem] p-4 flex flex-col justify-between shadow-[0_0_15px_#0ff,0_0_25px_#f0f,0_0_35px_#f70,inset_0_0_10px_rgba(10,2,29,1)] border border-fuchsia-500/50">
 
         {/* Wallet Connection Status */}
         <div className="text-center mb-2">
           {isConnected ? (
             <div className="text-green-400 text-sm">
-              ✅ Wallet Connected | Balance: {balance.toFixed(4)} SOL
+              ✅ Wallet Connected | Balance: {balance.toFixed(4)} GOR
             </div>
           ) : (
             <div className="text-orange-400 text-sm">
@@ -491,7 +491,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
           <div className="flex justify-between items-center text-yellow-400 font-bold px-2">
             <div className="text-center w-28 py-1 border-2 border-fuchsia-600/50 relative" style={{ clipPath: 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)' }}>
               <div className="text-xs uppercase">GRAND</div>
-              <div className="text-xs text-green-400 font-bold">{grandJackpot.toFixed(3)} SOL</div>
+              <div className="text-xs text-green-400 font-bold">{grandJackpot.toFixed(3)} GOR</div>
               {jackpotWon === 'grand' && showJackpotWin && (
                 <div className="absolute inset-0 bg-yellow-400 text-black rounded animate-pulse flex items-center justify-center text-xs font-black">
                   WON!
@@ -503,7 +503,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
             </div>
             <div className="text-center w-28 py-1 border-2 border-fuchsia-600/50 relative" style={{ clipPath: 'polygon(20% 0%, 80% 0%, 100% 100%, 0% 100%)' }}>
               <div className="text-xs uppercase">MINOR</div>
-              <div className="text-xs text-blue-400 font-bold">{minorJackpot.toFixed(3)} SOL</div>
+              <div className="text-xs text-blue-400 font-bold">{minorJackpot.toFixed(3)} GOR</div>
               {jackpotWon === 'minor' && showJackpotWin && (
                 <div className="absolute inset-0 bg-blue-400 text-white rounded animate-pulse flex items-center justify-center text-xs font-black">
                   WON!
@@ -855,11 +855,11 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                 className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
                 disabled={isSpinning}
               >
-                <option value={0.001}>0.001 SOL</option>
-                <option value={0.01}>0.01 SOL</option>
-                <option value={0.1}>0.1 SOL</option>
-                <option value={0.5}>0.5 SOL</option>
-                <option value={1}>1 SOL</option>
+                <option value={0.001}>0.001 GOR</option>
+                <option value={0.01}>0.01 GOR</option>
+                <option value={0.1}>0.1 GOR</option>
+                <option value={0.5}>0.5 GOR</option>
+                <option value={1}>1 GOR</option>
               </select>
             </div>
           </div>

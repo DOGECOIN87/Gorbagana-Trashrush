@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Desktop Layout Test</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; }
+        .debug { position: fixed; bottom: 10px; left: 10px; background: black; color: white; padding: 10px; border-radius: 5px; }
+        .desktop-layout { display: flex; height: 100vh; }
+        .sidebar { width: 250px; background: #1a1a2e; color: white; padding: 20px; }
+        .main { flex: 1; background: #16213e; color: white; padding: 20px; }
+        .chat { width: 300px; background: #0f0f23; color: white; padding: 20px; }
+        .mobile-layout { padding: 20px; background: #0a021d; color: white; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="app"></div>
+    <div class="debug" id="debug"></div>
+
+    <script>
+        function updateLayout() {
+            const width = window.innerWidth;
+            const isDesktop = width >= 1024;
+            const app = document.getElementById('app');
+            const debug = document.getElementById('debug');
+            
+            debug.textContent = `${isDesktop ? '🖥️ Desktop' : '📱 Mobile'} Mode | Width: ${width}px`;
+            
+            if (isDesktop) {
+                app.innerHTML = `
+                    <div class="desktop-layout">
+                        <div class="sidebar">
+                            <h2>🎰 Navigation</h2>
+                            <ul style="list-style: none; padding: 0;">
+                                <li style="padding: 10px; background: #333; margin: 5px 0; border-radius: 5px;">🎰 Game</li>
+                                <li style="padding: 10px; background: #222; margin: 5px 0; border-radius: 5px;">💰 Paytable</li>
+                                <li style="padding: 10px; background: #222; margin: 5px 0; border-radius: 5px;">⚙️ Settings</li>
+                                <li style="padding: 10px; background: #222; margin: 5px 0; border-radius: 5px;">👤 Profile</li>
+                                <li style="padding: 10px; background: #222; margin: 5px 0; border-radius: 5px;">❓ Help</li>
+                            </ul>
+                        </div>
+                        <div class="main">
+                            <h1>🎰 Gorbagana Slots - Desktop Mode</h1>
+                            <p>This is the desktop layout with:</p>
+                            <ul>
+                                <li>Left sidebar with navigation</li>
+                                <li>Center content area</li>
+                                <li>Right chat sidebar</li>
+                            </ul>
+                            <p><strong>Your React app should look similar to this when width ≥ 1024px</strong></p>
+                        </div>
+                        <div class="chat">
+                            <h3>💬 Global Chat</h3>
+                            <div style="background: #222; padding: 10px; margin: 10px 0; border-radius: 5px;">
+                                <strong>Player1:</strong> Just won big! 🎉
+                            </div>
+                            <div style="background: #222; padding: 10px; margin: 10px 0; border-radius: 5px;">
+                                <strong>Player2:</strong> Nice! What combo?
+                            </div>
+                            <input type="text" placeholder="Type message..." style="width: 100%; padding: 10px; margin-top: 10px; border: none; border-radius: 5px;">
+                        </div>
+                    </div>
+                `;
+            } else {
+                app.innerHTML = `
+                    <div class="mobile-layout">
+                        <h1>📱 Mobile Mode</h1>
+                        <p>This is the mobile layout</p>
+                        <p>Resize your browser to ≥1024px width to see desktop mode</p>
+                    </div>
+                `;
+            }
+        }
+        
+        updateLayout();
+        window.addEventListener('resize', updateLayout);
+    </script>
+</body>
+</html>
