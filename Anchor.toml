@@ -8,10 +8,10 @@ seeds = false
 skip-lint = false
 
 [programs.localnet]
-gorbagana_slots = "GLggLdyZCymzNnU6jNmhynwuyhEmpZQJi6LhgzAepB1H"
+gorbagana_slots = "5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF"
 
 [programs.testnet]
-gorbagana_slots = "GLggLdyZCymzNnU6jNmhynwuyhEmpZQJi6LhgzAepB1H"
+gorbagana_slots = "5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF"
 
 [registry]
 url = "https://api.apr.dev"
