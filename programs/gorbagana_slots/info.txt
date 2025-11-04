@@ -1,0 +1,245 @@
+Resolving Rust Version Conflicts Between Anchor
+and Solana (Agave) CLI
+Understanding the Rust Version Conflict
+Modern Anchor versions depend on Solana crates that require newer Rust features (Rust 1.76+), but the
+Solana/Agave CLI often lags with an older embedded Rust. For example, Anchor programs using solana-
+program v2.x can trigger errors like:
+“error: package solana-program v2.1.11 cannot be built because it requires rustc 1.79.0 or
+newer, while the currently active rustc version is 1.75.0-dev” .
+Here “1.75.0-dev” refers to the Rust compiler bundled with Solana’s tools – Solana CLI 2.0 (Agave) shipped
+platform-tools v1.41 with rustc 1.75.0 . In short, your system Rust might be up-to-date, but anchor
+build / cargo build-sbf uses the Solana-provided rustc, causing a version mismatch. Below are
+solutions to resolve this conflict.
+Solution 1: Use Anchor & Solana Versions Compatible with Rust 1.75
+If upgrading the CLI is not an option, you can align your project to the older toolchain by using slightly older
+Anchor/Solana versions that don’t require the newest Rust features:
+Choose an older Anchor release: For instance, Anchor v0.29 was designed to work with Solana
+1.16–1.18 and doesn’t demand Rust 1.79. Projects have fixed similar issues by downgrading to
+Anchor 0.29 (with compatible Solana crates) . In practice, you would set your Cargo
+dependencies to something like:
+anchor-lang = "0.29.0"
+anchor-spl = "0.29.0"
+solana-program = "1.17.17"
+This ensures you use Solana SDK v1.17 (which required a lower rustc). Anchor 0.29 + Solana 1.17/1.18
+can compile on Rust 1.75 or earlier, as they were released before the Rust 1.79 bump.
+Pin Solana crates to older versions: Even without changing Anchor, you may override the Solana
+SDK version to one that supports Rust 1.75. The error messages often suggest using an older
+solana-program version that’s compatible with the current toolchain . For example, if
+Anchor 0.30 pulls in solana-program v2.1.11 (needs Rust 1.79), you can temporarily
+downgrade that to v1.18.x which only requires Rust 1.72–1.75. In Cargo.toml you might add a
+patch or use cargo update -p solana-program --precise 1.18.20 to force a compatible
+1
+2
+•
+3 4
+•
+5 6
+1
+version . Indeed, one developer “temporarily fixed it by using solana-program v1.18” until they could
+update the toolchain . This workaround lets the build succeed with Rust 1.75.0, at the cost of
+using slightly older Solana libraries.
+Note: Using older Anchor/Solana versions is a short-term fix. You may miss out on new features and
+important updates. Ideally, plan to upgrade the Solana toolchain so you can use the latest Anchor releases.
+Solution 2: Upgrade the Solana (Agave) CLI to a Newer Rust
+Toolchain
+The official recommendation from Solana and Anchor maintainers is to update your Solana CLI to a
+version that includes a newer Rust compiler. Since the Solana CLI bundles its own Rust toolchain, updating
+the CLI is how you “upgrade” that Rust version – you generally cannot manually change the internal rustc
+in-place .
+Update to a CLI version with Rust ≥1.76: Newer Solana/Agave releases bump the SBF compiler
+version. For example, upgrading from solana-cli 2.0.0 to solana-cli 2.1.5 updated the embedded
+compiler from rustc 1.75.0 to rustc 1.79.0 . After installing v2.1.5, you can verify this by running
+cargo build-sbf --version – it should output something like: “platform-tools v1.43 – rustc
+1.79.0” , indicating the toolchain is now up-to-date enough for Anchor 0.30+. In general, find the
+Solana CLI release that meets Anchor’s Minimum Supported Rust Version (MSRV). Anchor 0.30
+required Rust 1.79, which was satisfied by platform-tools v1.43 (solana-cli 2.1.x) . Similarly, Anchor
+0.31/0.32 raised requirements further (e.g. Anchor 0.32 needs Rust 1.89), so the Solana CLI 2.3.0 or
+above is recommended in that case (Solana v2.3 likely ships rustc ≥1.89).
+Installation commands: Use the Solana installer to grab a specific release. For Solana 2.x (Agave),
+the tool is typically named agave-install . You can run the install script for the desired version.
+For example, to get Solana CLI v2.3.0 (which corresponds to the latest stable as of Anchor 0.32):
+sh -c "$(curl -sSfL https://release.anza.xyz/v2.3.0/install)"
+This downloads and installs the CLI. Afterward, solana --version should show the updated
+version (e.g. solana-cli 2.3.0 (client: Agave) ), and the bundled Rust will be newer. The
+Anchor team explicitly notes that Anchor 0.32’s recommended Solana CLI is v2.3.0 . Always check
+Anchor release notes for such guidance.
+If using Solana 1.x CLI: The classic installer is solana-install . For example, if you were on an
+older 1.18 toolchain that was outdated, you could run:
+solana-install init 1.18.12
+This command fetches Solana tools v1.18.12, which updated the internal Rust (in this case to rustc
+1.73+) and resolved a build error with the bumpalo crate . In general, run solana-install
+7
+5 6
+8
+•
+9
+9
+9
+10
+•
+11
+•
+12
+2
+init <latest-version> to get the newest patch of your release line, or use the script from the
+official docs (for example, curl https://release.solana.com/v1.19.0/install for a
+specific version). After updating, try cargo build-sbf again – the error should disappear if the
+rustc now meets Anchor’s requirement.
+Upgrading the Solana CLI is the cleanest solution. It ensures your build environment is in sync with
+Anchor’s needs and avoids having to juggle dependency downgrades. The error messages themselves point
+to this: “Use solana-install update … to install a newer version” . In most cases, simply installing the
+latest stable Solana release fixes the Rust version conflict. (For Agave CLI users, agave-install update
+performs a similar function of updating to the newest version once you’ve installed the tool .)
+Tip: After any CLI update, you can confirm the Rust version by running cargo build-sbf
+--version . This shows the Solana build tool version and the rustc version it uses .
+Ensure the reported rustc is at or above the needed version (e.g. 1.76.0 or higher). If not, you
+may need an even newer Solana release.
+Solution 3: Override or Patch the SBF Rust Toolchain (Advanced)
+For advanced users, there are ways to override the Rust compiler used for Solana SBF builds. These are not
+officially documented as standard practice (use them with caution), but they can unblock you if you’re stuck
+with a particular CLI version:
+Use an override toolchain via rustup: The Solana build process may use a custom rustup toolchain
+(often named "solana" or "bpf" ) isolated from your default Rust. You can try to force it to use a
+different toolchain by prefixing commands. For example, running cargo +stable build-sbf
+attempts to compile with your system’s stable toolchain instead of the embedded one. Similarly, you
+can set an environment variable for the build:
+RUSTUP_TOOLCHAIN=stable cargo build-sbf
+This approach tells cargo to use your installed stable/nightly Rust for the build. Note: In practice, the
+Solana build scripts sometimes override this (as they specifically call the bundled toolchain). Some
+users report this didn’t fully work for them , so your mileage may vary. It’s still worth a try if you
+have a newer Rust installed globally.
+Specify a newer platform tools release: Solana’s cargo wrappers allow choosing a platform-tools
+version if it’s available. You can invoke:
+cargo build-sbf --tools-version v1.<XX>
+to try using a specific release of the SBF compiler. For instance, if your default is using v1.41 (rustc
+1.75) and you know v1.43 has rustc 1.79, you could run cargo build-sbf --tools-version
+v1.43 . This will download and use the v1.43 toolchain for the build, overriding the default,
+provided that version exists on the build server. Essentially it’s like manually updating the tools for just
+7
+13
+2
+•
+14
+•
+15
+3
+that compile. This flag is helpful if you cannot do a full CLI upgrade but know exactly which tools
+version has the needed rustc.
+Use a custom Rust toolchain for BPF: Another workaround is to install the Solana BPF target on a
+nightly or custom Rust toolchain yourself, and then tell Anchor/Cargo to use that compiler. You can
+do this by installing a Rust toolchain with the bpfel-unknown-unknown target and setting the
+BPF_RUSTC environment variable. For example:
+rustup toolchain install nightly-2024-06-10 --target bpfel-unknown-unknown
+--component rust-std
+export BPF_RUSTC="$HOME/.rustup/toolchains/nightly-2024-06-10-x86_64-
+unknown-linux-gnu/bin/rustc"
+This assumes the nightly from 2024-06-10 has the needed features. The BPF_RUSTC env var directs
+Anchor’s build to use that rustc path for compiling programs . Essentially, you’re bypassing the
+Solana CLI’s rustc and using your own (which could be newer). Developers have used this method to
+force Anchor to compile with Rust 1.69+ in the past . Ensure the custom rustc is compatible with
+Solana’s BPF target (the upstream nightly rustc should work for most cases now that Solana’s BPF
+changes are upstreamed).
+Build Solana programs without the solana-cli: In a pinch, you can compile the program as a
+normal Rust cdylib for the BPF target using cargo. For example: rustup +nightly cargo
+build --target bpfel-unknown-unknown . This requires adding the target with rustup
+target add bpfel-unknown-unknown . Anchor’s CLI normally handles this, but you could compile
+the .so manually with a suitable rustc and then use solana program deploy to deploy it. This
+isn’t a one-step override, but it is a path to avoid using the Solana-provided rustc. (For most users,
+using BPF_RUSTC as above is easier.)
+Important: These approaches are unofficial hacks – the Solana maintainers generally do not encourage
+manual toolchain overrides. The first two bullet points (rustup override or --tools-version ) are easier
+and reversible; the BPF_RUSTC method is more advanced. Always double-check the results (use cargo
+build-sbf --version to see which rustc is actually used). When in doubt, the safest course is still to
+update the CLI itself. The Solana Stack Exchange community and core engineers often emphasize updating
+the Solana tools rather than patching around them .
+Conclusion
+Preferred Solution: Upgrade your Solana/Agave CLI to a release that meets Anchor’s Rust requirement.
+This is the solution endorsed by official docs and maintainers – e.g. the error message explicitly advises
+installing a newer Solana release . By using the latest Solana CLI (or at least the version recommended
+for your Anchor release), you ensure the bundled rustc is new enough. For example, developers resolved
+the conflict by moving to Solana CLI 2.1.5+ for Anchor 0.30 projects (bundling rustc ≥1.79) , and newer
+Anchor 0.32 projects require Solana 2.3.0 (with an even newer rustc) .
+•
+16
+16
+•
+8
+7
+17
+10
+4
+Alternative Solutions: In scenarios where you cannot immediately update the CLI (such as corporate
+environments or CI constraints), using an older Anchor or downgrading Solana crates can work in the
+interim. This was demonstrated by pinning anchor-lang 0.29 with Solana 1.17, which compiles on the
+older rustc . However, this should be temporary. Keeping to older versions may block you from
+important fixes and features in Anchor.
+Anchoring Tool Versions: To avoid future mismatches, Anchor provides tooling to manage versions. You
+can use the Anchor Version Manager ( avm ) and specify in Anchor.toml which Solana CLI version and
+Anchor version your project should use . For example:
+[toolchain]
+anchor_version = "0.30.0"
+solana_version = "2.1.5"
+This way, teammates or CI pulling your project will automatically use the correct Anchor/CLI combo (avm
+can automatically switch Anchor, and it can even download the specified Solana release). This ensures
+consistency and can prevent Rust version errors by sticking to known-good combinations.
+In summary, the primary resolution is to align the Solana-provided Rust toolchain with what Anchor needs.
+The official Solana installer or Agave updater is your friend – run the update, and the error “requires rustc X
+or newer” will disappear in most cases. If you’re ever unsure, check the Anchor release notes or Stack
+Exchange solutions for the exact version numbers (for instance, “solana-cli 2.1.16 (Agave) uses rustc 1.79.0-
+dev” ). Prioritize staying on supported versions, and you’ll have a much smoother development
+experience free of Rust version conflicts.
+Sources:
+Solana Stack Exchange – Anchor build error: requires rustc newer than Solana tools
+Solana Stack Exchange – Understanding Solana’s Rust toolchains and updates
+Solana Stack Exchange – Anchor/Solana version compatibility issues
+Official Anchor Docs – Anchor 0.32 release notes (Solana CLI and Rust upgrade)
+Stack Overflow – Why anchor build shows a different (older) rustc version (using BPF_RUSTC
+override)
+Solana Stack Exchange – How to get Solana’s build tools rust version (platform-tools and rustc info)
+Stack Exchange – Various Q&A demonstrating solana-install and CLI update usage
+Anchor Build Error: solana-program requires Rust 1.79.0+ but Solana tools use 1.75.0-dev -
+Solana Stack Exchange
+https://solana.stackexchange.com/questions/19629/anchor-build-error-solana-program-requires-rust-1-79-0-but-solana-tools-
+use-1
+rust - How do you get the Solana platform tools version? Or the `rustc` version used by Solana to
+compile programs? - Solana Stack Exchange
+https://solana.stackexchange.com/questions/17224/how-do-you-get-the-solana-platform-tools-version-or-the-rustc-version-used-
+by
+3
+18
+19
+• 1 9 20
+• 5 8
+• 3 4
+• 11 10
+• 16
+• 2
+• 12 15
+1 7 9 17 20
+2 15
+5
+rust - Anchor compatibility issues - Solana Stack Exchange
+https://solana.stackexchange.com/questions/9740/anchor-compatibility-issues
+Rust Toolchains and how to update them - Solana Stack Exchange
+https://solana.stackexchange.com/questions/18442/rust-toolchains-and-how-to-update-them
+0.32.0
+https://www.anchor-lang.com/docs/updates/release-notes/0-32-0
+solana cli - How to change currently active version rust compiler? - Stack Overflow
+https://stackoverflow.com/questions/78184054/how-to-change-currently-active-version-rust-compiler
+Install the Solana CLI | Agave
+https://docs.anza.xyz/cli/install
+rust - Why is "anchor build" and "Cargo build-bpf" showing wrong rustc version? - Stack Overflow
+https://stackoverflow.com/questions/71598808/why-is-anchor-build-and-cargo-build-bpf-showing-wrong-rustc-version
+0.29.0
+https://www.anchor-lang.com/docs/updates/release-notes/0-29-0
+build version issue · Issue #3614 · solana-foundation/anchor · GitHub
+https://github.com/solana-foundation/anchor/issues/3614
+3 4
+5 6 8
+10 11
+12 14
+13
+16
+18
+19
+6

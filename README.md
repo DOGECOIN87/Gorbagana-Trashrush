@@ -112,8 +112,8 @@ The application is ready to run in demo mode without any blockchain setup:
 - **No match**: No payout
 
 ### Betting
-- Minimum bet: 0.001 SOL
-- Maximum bet: 1 SOL
+- Minimum bet: 0.001 GOR
+- Maximum bet: 1 GOR
 - Adjustable bet amounts via dropdown
 
 ## 📁 Project Structure

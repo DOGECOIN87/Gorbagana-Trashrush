@@ -17,7 +17,6 @@ type SymbolName = keyof typeof SYMBOLS;
 type SymbolId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 interface BlockchainSlotGameProps {
-  wallet?: any;
   onSpin?: (betAmount: number) => Promise<{ symbols: [number, number, number], payout: number }>;
   isConnected?: boolean;
   balance?: number;
@@ -63,7 +62,6 @@ const createInitialGrid = (): SymbolName[][] => {
 };
 
 export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
-  wallet,
   onSpin,
   isConnected = false,
   balance = 0
@@ -91,7 +89,17 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   // Mini-game states
   const [miniGameActive, setMiniGameActive] = useState(false);
   const [miniGameType, setMiniGameType] = useState<'memory' | 'reflex' | 'sequence'>('memory');
-  const [miniGameData, setMiniGameData] = useState<any>(null);
+  const [miniGameData, setMiniGameData] = useState<{
+    sequence?: SymbolName[];
+    playerSequence?: SymbolName[];
+    currentIndex?: number;
+    targetSymbol?: SymbolName;
+    startTime?: number;
+    reactionTime?: number;
+    pattern?: SymbolName[];
+    playerInput?: SymbolName[];
+    phase?: string;
+  } | null>(null);
   const [miniGameScore, setMiniGameScore] = useState(0);
   const [showMiniGameResult, setShowMiniGameResult] = useState(false);
 
@@ -171,7 +179,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   }, [createParticles]);
 
   // Skill-based mechanics functions
-  const calculateTimingBonus = useCallback((reelIndex: number, timing: number): number => {
+  const calculateTimingBonus = useCallback((_reelIndex: number, timing: number): number => {
     // Perfect timing window (around 500-700ms gives best bonus)
     const perfectTiming = 600;
     const tolerance = 100;
@@ -236,7 +244,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
         console.log('Reflex game data:', gameData);
         break;
       case 'sequence':
-        gameData = { pattern: ['gorbagana', 'wild', 'trash'], playerInput: [], phase: 'show' };
+        gameData = { pattern: ['gorbagana', 'wild', 'trash'] as SymbolName[], playerInput: [] as SymbolName[], phase: 'show' };
         console.log('Sequence game data:', gameData);
         break;
       default:
@@ -344,21 +352,22 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
     setWinningLines([]);
     setError('');
 
-    // Reset skill mechanics
+    // Reset skill mechanics properly
     setReelsStopped([false, false, false]);
     setTimingBonuses([1, 1, 1]);
     setReelTimers([0, 0, 0]);
 
-    // Start reel timers for skill mode
+    // Start reel timers for skill mode with proper stopping logic
     let timerInterval: NodeJS.Timeout | null = null;
     if (skillMode) {
       timerInterval = setInterval(() => {
         setReelTimers(prev => prev.map((timer, index) => {
-          // Don't increment timer for stopped reels
+          // Only increment if reel is not stopped
           return reelsStopped[index] ? timer : timer + 50;
         }));
       }, 50);
 
+      // Clear timer when spin animation ends
       setTimeout(() => {
         if (timerInterval) clearInterval(timerInterval);
       }, SPIN_ANIMATION_DURATION);
@@ -424,7 +433,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
         const jackpotPayout = checkForJackpot(spinResult.symbols);
 
         // Check for bonus games
-        const bonusTriggered = checkForBonusGame(spinResult.symbols);
+        checkForBonusGame(spinResult.symbols);
 
         // Determine final payout (jackpot overrides regular payout)
         const finalPayout = jackpotPayout > 0 ? jackpotPayout : spinResult.payout;
@@ -464,7 +473,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
 
   return (
     <div className="flex items-center justify-center min-h-screen text-white p-2 antialiased" style={{ fontFamily: "'Exo 2', sans-serif" }}>
-      <div className="relative w-full max-w-[420px] min-h-[800px] bg-[#000] rounded-[3rem] p-4 flex flex-col justify-between shadow-[0_0_15px_#0ff,0_0_25px_#f0f,0_0_35px_#f70,inset_0_0_10px_rgba(10,2,29,1)] border border-fuchsia-500/50">
+      <div className="relative w-full max-w-[420px] min-h-[800px] bg-gradient-to-br from-slate-900 via-purple-900/20 to-slate-900 rounded-[3rem] p-4 flex flex-col justify-between shadow-[0_0_20px_rgba(139,92,246,0.3),0_0_40px_rgba(139,92,246,0.1),inset_0_0_15px_rgba(10,2,29,0.8)] border border-purple-500/30 backdrop-blur-sm">
 
         {/* Wallet Connection Status */}
         <div className="text-center mb-2">
@@ -522,18 +531,24 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
         </header>
 
         {/* Skill Mode Toggle */}
-        <div className="mb-2 flex justify-center">
-          <div className="bg-slate-800 rounded-lg p-1 flex items-center gap-2">
-            <span className="text-xs text-gray-400">Mode:</span>
+        <div className="mb-3 flex justify-center">
+          <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl p-1 flex items-center gap-1 shadow-lg border border-slate-600/50">
+            <span className="text-xs text-gray-300 px-2 font-medium">Mode:</span>
             <button
               onClick={() => setSkillMode(!skillMode)}
-              className={`px-3 py-1 rounded text-xs font-bold transition-colors ${skillMode
-                ? 'bg-green-600 text-white'
-                : 'bg-gray-600 text-gray-300'
-                }`}
+              className={`relative px-4 py-2 rounded-lg text-xs font-bold transition-all duration-300 transform ${
+                skillMode
+                  ? 'bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-md scale-105'
+                  : 'bg-gradient-to-r from-slate-600 to-slate-500 text-gray-300 hover:from-slate-500 hover:to-slate-400'
+              } ${isSpinning ? 'opacity-50 cursor-not-allowed' : 'hover:scale-105 active:scale-95'}`}
               disabled={isSpinning}
             >
-              {skillMode ? '🎯 SKILL' : '🎲 AUTO'}
+              <span className="flex items-center gap-1">
+                {skillMode ? '🎯' : '🎲'} {skillMode ? 'SKILL' : 'AUTO'}
+              </span>
+              {skillMode && (
+                <div className="absolute -top-1 -right-1 w-2 h-2 bg-yellow-400 rounded-full animate-pulse"></div>
+              )}
             </button>
           </div>
         </div>
@@ -675,7 +690,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                 </div>
 
                 {/* Memory Game */}
-                {miniGameType === 'memory' && miniGameData && (
+                {miniGameType === 'memory' && miniGameData && miniGameData.sequence && miniGameData.playerSequence && miniGameData.currentIndex !== undefined && (
                   <div className="space-y-4">
                     <div className="text-center text-sm text-gray-400">
                       Sequence: {miniGameData.currentIndex + 1} / {miniGameData.sequence.length}
@@ -685,7 +700,8 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                         <button
                           key={symbolName}
                           onClick={() => {
-                            const newPlayerSequence = [...miniGameData.playerSequence, symbolName];
+                            if (!miniGameData?.sequence || !miniGameData?.playerSequence) return;
+                            const newPlayerSequence = [...miniGameData.playerSequence, symbolName as SymbolName];
                             const isCorrect = newPlayerSequence[newPlayerSequence.length - 1] === miniGameData.sequence[newPlayerSequence.length - 1];
 
                             if (isCorrect && newPlayerSequence.length === miniGameData.sequence.length) {
@@ -711,9 +727,9 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                       ))}
                     </div>
                     <div className="text-center text-xs text-gray-500">
-                      Target: {miniGameData.sequence.slice(0, miniGameData.currentIndex + 1).map((s: string, i: number) => (
+                      Target: {miniGameData.sequence.slice(0, miniGameData.currentIndex + 1).map((s: SymbolName, i: number) => (
                         <span key={i} className="inline-block mx-1">
-                          {SYMBOLS[s as SymbolName].name}
+                          {SYMBOLS[s]?.name || s}
                         </span>
                       ))}
                     </div>
@@ -721,14 +737,14 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                 )}
 
                 {/* Reflex Game */}
-                {miniGameType === 'reflex' && miniGameData && (
+                {miniGameType === 'reflex' && miniGameData && miniGameData.targetSymbol && miniGameData.startTime !== undefined && (
                   <div className="space-y-4">
                     <div className="text-center">
                       <div className="text-lg font-bold text-yellow-400 mb-2">
                         Click when you see:
                       </div>
                       <img
-                        src={SYMBOLS[miniGameData.targetSymbol].img}
+                        src={SYMBOLS[miniGameData.targetSymbol]?.img}
                         alt={miniGameData.targetSymbol}
                         className="w-16 h-16 object-contain mx-auto mb-4"
                       />
@@ -741,6 +757,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                           <button
                             key={i}
                             onClick={() => {
+                              if (miniGameData?.startTime === undefined || !miniGameData?.targetSymbol) return;
                               const reactionTime = Date.now() - miniGameData.startTime;
                               const score = isTarget ? Math.max(0, 100 - (reactionTime / 10)) : 0;
                               completeMiniGame(score);
@@ -748,8 +765,8 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                             className="p-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
                           >
                             <img
-                              src={SYMBOLS[isTarget ? miniGameData.targetSymbol : randomSymbol].img}
-                              alt={isTarget ? miniGameData.targetSymbol : randomSymbol}
+                              src={SYMBOLS[isTarget && miniGameData.targetSymbol ? miniGameData.targetSymbol : randomSymbol]?.img}
+                              alt={isTarget && miniGameData.targetSymbol ? miniGameData.targetSymbol : randomSymbol}
                               className="w-8 h-8 object-contain mx-auto"
                             />
                           </button>
@@ -847,20 +864,36 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
         <footer className="w-full mt-4">
           {/* Bet Amount Selector */}
           <div className="flex justify-center mb-4">
-            <div className="bg-slate-800 rounded-lg p-2 flex items-center gap-2">
-              <span className="text-sm text-gray-400">Bet:</span>
-              <select
-                value={betAmount}
-                onChange={(e) => setBetAmount(Number(e.target.value))}
-                className="bg-slate-700 text-white rounded px-2 py-1 text-sm"
-                disabled={isSpinning}
-              >
-                <option value={0.001}>0.001 GOR</option>
-                <option value={0.01}>0.01 GOR</option>
-                <option value={0.1}>0.1 GOR</option>
-                <option value={0.5}>0.5 GOR</option>
-                <option value={1}>1 GOR</option>
-              </select>
+            <div className="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl p-2 flex items-center gap-3 shadow-lg border border-slate-600/50">
+              <span className="text-sm text-gray-300 font-medium flex items-center gap-1">
+                <span className="text-yellow-400">💰</span> Bet:
+              </span>
+              <div className="relative">
+                <select
+                  value={betAmount}
+                  onChange={(e) => setBetAmount(Number(e.target.value))}
+                  className={`appearance-none bg-gradient-to-r from-slate-700 to-slate-600 text-white rounded-lg px-4 py-2 pr-8 text-sm font-bold border border-slate-500/50 transition-all duration-200 ${
+                    isSpinning
+                      ? 'opacity-50 cursor-not-allowed'
+                      : 'hover:from-slate-600 hover:to-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-400/50'
+                  }`}
+                  disabled={isSpinning}
+                >
+                  <option value={0.001}>0.001 GOR</option>
+                  <option value={0.01}>0.01 GOR</option>
+                  <option value={0.1}>0.1 GOR</option>
+                  <option value={0.5}>0.5 GOR</option>
+                  <option value={1}>1 GOR</option>
+                </select>
+                <div className="absolute right-2 top-1/2 transform -translate-y-1/2 pointer-events-none">
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </div>
+              <div className="text-xs text-gray-400 bg-slate-800/50 px-2 py-1 rounded">
+                Max: {balance.toFixed(3)} GOR
+              </div>
             </div>
           </div>
 
@@ -892,7 +925,7 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                   : 'text-white'
                 : 'text-white'
                 }`}>
-                {lastWin > 0 ? `${lastWin.toFixed(4)} SOL` : ''}
+                {lastWin > 0 ? `${lastWin.toFixed(4)} GOR` : ''}
               </div>
               {/* Win Multiplier Display */}
               {isWinAnimating && winMultiplier > 0 && (
@@ -906,18 +939,42 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
               )}
             </div>
 
-            <button
-              onClick={handleSpin}
-              disabled={isSpinning || !isConnected || balance < betAmount}
-              aria-label={isSpinning ? 'Spinning...' : 'Spin the reels'}
-              className="w-16 h-16 rounded-full bg-gradient-to-b from-blue-500 to-indigo-800 text-white font-black text-lg uppercase shadow-[0_5px_15px_rgba(0,0,0,0.5),inset_0_-4px_10px_rgba(0,0,0,0.8),inset_0_2px_2px_rgba(255,255,255,0.2)] border-2 border-blue-300/50 transition-all duration-150 disabled:from-gray-600 disabled:to-gray-800 disabled:text-gray-400 disabled:cursor-not-allowed disabled:shadow-none active:translate-y-1 active:shadow-[0_2px_5px_rgba(0,0,0,0.5),inset_0_-2px_5px_rgba(0,0,0,0.8)]"
-            >
-              {isSpinning ? (
-                <div className="animate-spin">⟳</div>
-              ) : (
-                'Spin'
+            <div className="relative">
+              <button
+                onClick={handleSpin}
+                disabled={isSpinning || !isConnected || balance < betAmount}
+                aria-label={isSpinning ? 'Spinning...' : 'Spin the reels'}
+                className={`relative w-20 h-20 rounded-full font-black text-lg uppercase transition-all duration-300 transform ${
+                  isSpinning
+                    ? 'bg-gradient-to-b from-orange-500 to-red-700 text-white shadow-[0_8px_20px_rgba(255,165,0,0.6)] animate-pulse scale-110'
+                    : !isConnected || balance < betAmount
+                      ? 'bg-gradient-to-b from-gray-600 to-gray-800 text-gray-400 cursor-not-allowed shadow-[0_4px_10px_rgba(0,0,0,0.3)]'
+                      : 'bg-gradient-to-b from-blue-500 to-indigo-800 text-white shadow-[0_8px_25px_rgba(59,130,246,0.5),inset_0_-4px_15px_rgba(0,0,0,0.8),inset_0_2px_4px_rgba(255,255,255,0.3)] hover:shadow-[0_10px_30px_rgba(59,130,246,0.7)] hover:scale-105 active:scale-95 active:translate-y-1'
+                } border-2 border-blue-300/50`}
+              >
+                {isSpinning ? (
+                  <div className="flex flex-col items-center">
+                    <div className="animate-spin text-2xl mb-1">⟳</div>
+                    <div className="text-xs font-bold">SPINNING</div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <span className="text-xl mb-1">🎰</span>
+                    <span className="text-sm font-black">SPIN</span>
+                  </div>
+                )}
+              </button>
+
+              {/* Pulsing ring effect when ready to spin */}
+              {!isSpinning && isConnected && balance >= betAmount && (
+                <div className="absolute inset-0 rounded-full border-2 border-cyan-400/50 animate-ping"></div>
               )}
-            </button>
+
+              {/* Loading indicator */}
+              {isSpinning && (
+                <div className="absolute inset-0 rounded-full border-2 border-orange-400/50 animate-spin border-t-transparent"></div>
+              )}
+            </div>
           </div>
         </footer>
       </div>

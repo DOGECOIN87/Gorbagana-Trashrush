@@ -1,24 +1,13 @@
-// Import images using ES modules for Vite
-import gorbaganaImg from './gorbagana.jpeg';
-import trashImg from './trashbag.jpeg';
-import takeoutImg from './chinesefood.jpeg';
-import fishImg from './fishbone.jpeg';
-import ratImg from './rat.jpeg';
-import bananaImg from './bananapeel.jpeg';
-import sevenImg from './7.png';
-import doubleSevensImg from './777.png';
-import wildImg from './Wild.png';
-import bonusChestImg from './Bonuschest.png';
-
+// Use direct paths for images - Vite will handle these correctly
 export const IMAGES = {
-    gorbagana: gorbaganaImg,
-    trashcan: trashImg,
-    takeout: takeoutImg,
-    fish: fishImg,
-    rat: ratImg,
-    banana: bananaImg,
-    seven: sevenImg,
-    tripleSeven: doubleSevensImg,
-    wild: wildImg,
-    bonusChest: bonusChestImg,
+    gorbagana: '/gorbagana.jpeg',
+    trashcan: '/trashbag.jpeg',
+    takeout: '/chinesefood.jpeg',
+    fish: '/fishbone.jpeg',
+    rat: '/rat.jpeg',
+    banana: '/bananapeel.jpeg',
+    seven: '/7.png',
+    tripleSeven: '/777.png',
+    wild: '/Wild.png',
+    bonusChest: '/Bonuschest.png',
 };

@@ -9,9 +9,9 @@
 ## Phase 2: Freemium Launch (Week 3-4)
 - Deploy to mainnet with minimal pool ($50-100)
 - Implement tiered betting system:
-  - Micro bets: 0.001 SOL (max win: 0.01 SOL)
-  - Small bets: 0.01 SOL (max win: 0.1 SOL)
-  - Standard bets: 0.1 SOL (max win: 1 SOL)
+  - Micro bets: 0.001 GOR (max win: 0.01 GOR)
+  - Small bets: 0.01 GOR (max win: 0.1 GOR)
+  - Standard bets: 0.1 GOR (max win: 1 GOR)
 
 ## Phase 3: Community Growth (Month 2)
 - House edge accumulates pool naturally

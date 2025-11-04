@@ -1,16 +1,17 @@
 [toolchain]
-anchor_version = "0.32.1"
-solana_version = "1.18.26"
+anchor_version = "0.30.0"
+solana_version = "2.1.5"
+channel = "stable"
 
 [features]
 seeds = false
 skip-lint = false
 
 [programs.localnet]
-gorbagana_slots = "5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF"
+gorbagana_slots = "BqF33RrRRXQ78AtU98kXGyLNuCgd1zmNd4HCJBoJf5G5"
 
 [programs.testnet]
-gorbagana_slots = "5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF"
+gorbagana_slots = "BqF33RrRRXQ78AtU98kXGyLNuCgd1zmNd4HCJBoJf5G5"
 
 [registry]
 url = "https://api.apr.dev"

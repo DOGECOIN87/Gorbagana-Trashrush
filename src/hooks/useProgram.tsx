@@ -3,8 +3,8 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import * as anchor from '@project-serum/anchor';
 import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
-// Program ID - replace with your actual deployed program ID
-const PROGRAM_ID = new PublicKey('PutYourProgramIDHere');
+// Program ID - matches the smart contract
+const PROGRAM_ID = new PublicKey('BqF33RrRRXQ78AtU98kXGyLNuCgd1zmNd4HCJBoJf5G5');
 
 // IDL definition - this should match your Rust program
 const IDL = {
@@ -55,6 +55,11 @@ const IDL = {
           "isSigner": true
         },
         {
+          "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
           "name": "systemProgram",
           "isMut": false,
           "isSigner": false
@@ -66,6 +71,84 @@ const IDL = {
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "claimPayout",
+      "accounts": [
+        {
+          "name": "slotsState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "addToPool",
+      "accounts": [
+        {
+          "name": "slotsState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "user",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "treasury",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "systemProgram",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "emergencyPause",
+      "accounts": [
+        {
+          "name": "slotsState",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "authority",
+          "isMut": false,
+          "isSigner": true
+        }
+      ],
+      "args": []
     }
   ],
   "accounts": [
@@ -97,6 +180,22 @@ const IDL = {
           {
             "name": "houseEdge",
             "type": "u8"
+          },
+          {
+            "name": "maxPayoutPerSpin",
+            "type": "u64"
+          },
+          {
+            "name": "totalPool",
+            "type": "u64"
+          },
+          {
+            "name": "minPoolThreshold",
+            "type": "u64"
+          },
+          {
+            "name": "paused",
+            "type": "bool"
           }
         ]
       }
@@ -140,6 +239,36 @@ const IDL = {
           "type": "u64"
         }
       ]
+    },
+    {
+      "name": "PoolDeposit",
+      "fields": [
+        {
+          "name": "user",
+          "type": "publicKey"
+        },
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "newPool",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "EmergencyAction",
+      "fields": [
+        {
+          "name": "action",
+          "type": "string"
+        },
+        {
+          "name": "authority",
+          "type": "publicKey"
+        }
+      ]
     }
   ],
   "errors": [
@@ -157,6 +286,26 @@ const IDL = {
       "code": 6002,
       "name": "InvalidAmount",
       "msg": "Invalid amount"
+    },
+    {
+      "code": 6003,
+      "name": "InsufficientFunds",
+      "msg": "Insufficient funds"
+    },
+    {
+      "code": 6004,
+      "name": "InsufficientPool",
+      "msg": "Insufficient pool funds"
+    },
+    {
+      "code": 6005,
+      "name": "Unauthorized",
+      "msg": "Unauthorized access"
+    },
+    {
+      "code": 6006,
+      "name": "GamePaused",
+      "msg": "Game is currently paused"
     }
   ]
 };
@@ -217,22 +366,26 @@ export const useProgram = () => {
     setIsLoading(true);
     try {
       const betAmountLamports = Math.floor(betAmount * LAMPORTS_PER_SOL);
-      
+
+      // Get the current slots state to find treasury
+      const slotsState = await program.account.slotsState.fetch(slotsStateAddress);
+
       const tx = await program.methods
         .spin(new anchor.BN(betAmountLamports))
         .accounts({
           slotsState: slotsStateAddress,
           user: wallet.publicKey,
+          treasury: slotsState.treasury,
           systemProgram: SystemProgram.programId,
         })
         .rpc();
 
       console.log('Spin transaction:', tx);
-      
-      // Listen for events
-      const events = await program.account.slotsState.fetch(slotsStateAddress);
-      
-      return { tx, events };
+
+      // Listen for events and return updated state
+      const updatedState = await program.account.slotsState.fetch(slotsStateAddress);
+
+      return { tx, state: updatedState };
     } catch (error) {
       console.error('Spin error:', error);
       throw error;

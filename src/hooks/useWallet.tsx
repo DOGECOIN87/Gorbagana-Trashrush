@@ -5,7 +5,6 @@ import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import {
     PhantomWalletAdapter,
     SolflareWalletAdapter,
-    TorusWalletAdapter,
 } from '@solana/wallet-adapter-wallets';
 import { clusterApiUrl } from '@solana/web3.js';
 
@@ -25,7 +24,6 @@ export const WalletContextProvider: React.FC<WalletContextProviderProps> = ({ ch
         () => [
             new PhantomWalletAdapter(),
             new SolflareWalletAdapter(),
-            new TorusWalletAdapter(),
         ],
         [network]
     );
