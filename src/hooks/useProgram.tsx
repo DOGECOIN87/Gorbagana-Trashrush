@@ -4,7 +4,7 @@ import * as anchor from '@project-serum/anchor';
 import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 
 // Program ID - matches the smart contract
-const PROGRAM_ID = new PublicKey('BqF33RrRRXQ78AtU98kXGyLNuCgd1zmNd4HCJBoJf5G5');
+const PROGRAM_ID = new PublicKey('GLggLdyZCymzNnU6jNmhynwuyhEmpZQJi6LhgzAepB1H');
 
 // IDL definition - this should match your Rust program
 const IDL = {
