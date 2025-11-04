@@ -32,12 +32,22 @@ Cargo.lock
 .env.production
 .env.staging
 
-# Wallet keys (NEVER commit these!)
+# CRITICAL SECURITY: Wallet keys and private keys (NEVER commit these!)
+*.key
+*.pem
+*.crt
 program-keypair.json
 id.json
 wallet-keypair.json
 *keypair.json
 !program-keypair.json.example
+
+# Environment variables (NEVER commit these!)
+.env
+.env.local
+.env.production
+.env.staging
+.env.development
 
 # Build artifacts
 build/
