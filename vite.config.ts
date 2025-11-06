@@ -4,7 +4,7 @@ import { defineConfig, loadEnv } from 'vite';
 export default defineConfig(({ mode }) => {
     const env = loadEnv(mode, '.', '');
     return {
-      base: mode === 'production' ? '/Gorbagana-Trashrush/' : '/',
+      base: '/',
       define: {
         global: 'globalThis',
         'process.env': {},

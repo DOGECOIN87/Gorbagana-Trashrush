@@ -10,6 +10,7 @@ import { DesktopSlotGame } from './src/components/DesktopSlotGame.tsx';
 import { BlockchainSlotGame } from './src/components/BlockchainSlotGame.tsx';
 import { WalletContextProvider } from './src/hooks/useWallet.tsx';
 import { useProgram } from './src/hooks/useProgram.tsx';
+import { ErrorBoundary } from './src/components/ErrorBoundary.tsx';
 
 // Real Application Component with Wallet Integration
 const AppContent: React.FC = () => {
@@ -130,7 +131,9 @@ if (rootElement) {
   const root = ReactDOM.createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </React.StrictMode>
   );
 }
