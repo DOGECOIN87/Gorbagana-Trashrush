@@ -1,5 +1,11 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { IMAGES } from '../../assets.tsx';
+import { ErrorDisplay, LoadingOverlay, Toast } from './ErrorDisplay';
+import { InlineInitializationPrompt } from './InlineInitializationPrompt';
+import { RTPAnalyzer } from './RTPAnalyzer';
+import { GameError } from '../utils/errorHandler';
+import { SpinResult } from '../utils';
+import { RTPrealTimeMonitor } from '../utils/rtpAnalysis';
 
 // Symbol configuration matching smart contract
 const SYMBOLS = {
@@ -17,9 +23,13 @@ type SymbolName = keyof typeof SYMBOLS;
 type SymbolId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 interface BlockchainSlotGameProps {
-  onSpin?: (betAmount: number) => Promise<{ symbols: [number, number, number], payout: number }>;
+  onSpin?: (betAmount: number) => Promise<SpinResult>;
   isConnected?: boolean;
   balance?: number;
+  currentError?: GameError | null;
+  onClearError?: () => void;
+  isLoading?: boolean;
+  onBalanceRefresh?: () => Promise<void>;
 }
 
 const REEL_ROWS = 3;
@@ -61,10 +71,30 @@ const createInitialGrid = (): SymbolName[][] => {
   );
 };
 
+interface BlockchainSlotGameProps {
+  onSpin?: (betAmount: number) => Promise<SpinResult>;
+  isConnected?: boolean;
+  balance?: number;
+  currentError?: GameError | null;
+  onClearError?: () => void;
+  isLoading?: boolean;
+  onBalanceRefresh?: () => Promise<void>;
+  isInitialized?: boolean | null;
+  onInitialize?: () => Promise<void>;
+  initializationError?: string;
+}
+
 export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   onSpin,
   isConnected = false,
-  balance = 0
+  balance = 0,
+  currentError,
+  onClearError,
+  isLoading = false,
+  onBalanceRefresh,
+  isInitialized = null,
+  onInitialize,
+  initializationError = ''
 }) => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [grid, setGrid] = useState<SymbolName[][]>(createInitialGrid);
@@ -72,6 +102,9 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   const [winningLines, setWinningLines] = useState<number[]>([]);
   const [betAmount, setBetAmount] = useState(DEFAULT_BET_AMOUNT);
   const [error, setError] = useState<string>('');
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error' | 'warning' | 'info'>('info');
 
   // Win animation states
   const [isWinAnimating, setIsWinAnimating] = useState(false);
@@ -99,6 +132,9 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
     pattern?: SymbolName[];
     playerInput?: SymbolName[];
     phase?: string;
+    showIndex?: number;
+    gridSymbols?: SymbolName[];
+    targetAppeared?: boolean;
   } | null>(null);
   const [miniGameScore, setMiniGameScore] = useState(0);
   const [showMiniGameResult, setShowMiniGameResult] = useState(false);
@@ -108,6 +144,10 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   const [minorJackpot, setMinorJackpot] = useState(2.5);  // Starting at 2.5 GOR
   const [jackpotWon, setJackpotWon] = useState<'grand' | 'minor' | null>(null);
   const [showJackpotWin, setShowJackpotWin] = useState(false);
+
+  // RTP Analysis states
+  const [showRTPAnalyzer, setShowRTPAnalyzer] = useState(false);
+  const [rtpMonitor] = useState(new RTPrealTimeMonitor());
 
   // Weighted symbol pool for animations
   const weightedSymbolPool = useMemo<SymbolName[]>(() => {
@@ -217,14 +257,24 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   const generateMemoryGame = useCallback(() => {
     const symbols = Object.keys(SYMBOLS) as SymbolName[];
     const sequence = Array.from({ length: 4 }, () => symbols[Math.floor(Math.random() * symbols.length)]);
-    return { sequence, playerSequence: [], currentIndex: 0 };
+    return { 
+      sequence, 
+      playerSequence: [], 
+      currentIndex: 0, 
+      phase: 'show',
+      showIndex: 0
+    };
   }, []);
 
   const generateReflexGame = useCallback(() => {
+    const symbols = Object.keys(SYMBOLS) as SymbolName[];
     return {
-      targetSymbol: Object.keys(SYMBOLS)[Math.floor(Math.random() * Object.keys(SYMBOLS).length)] as SymbolName,
+      targetSymbol: symbols[Math.floor(Math.random() * symbols.length)],
       startTime: Date.now(),
-      reactionTime: 0
+      reactionTime: 0,
+      phase: 'waiting',
+      gridSymbols: [],
+      targetAppeared: false
     };
   }, []);
 
@@ -255,15 +305,113 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
     setMiniGameActive(true);
   }, [generateMemoryGame, generateReflexGame]);
 
+  // Memory game phase management
+  useEffect(() => {
+    if (miniGameActive && miniGameType === 'memory' && miniGameData?.phase === 'show' && miniGameData?.sequence) {
+      const showSequence = () => {
+        const currentShowIndex = miniGameData.showIndex || 0;
+        
+        if (currentShowIndex < miniGameData.sequence!.length) {
+          // Show next symbol in sequence
+          setTimeout(() => {
+            setMiniGameData(prev => prev ? {
+              ...prev,
+              showIndex: currentShowIndex + 1
+            } : null);
+          }, 800); // Show each symbol for 800ms
+        } else {
+          // Sequence shown completely, switch to input phase
+          setTimeout(() => {
+            setMiniGameData(prev => prev ? {
+              ...prev,
+              phase: 'input',
+              showIndex: 0
+            } : null);
+          }, 500);
+        }
+      };
+
+      showSequence();
+    }
+  }, [miniGameActive, miniGameType, miniGameData?.phase, miniGameData?.showIndex]);
+
+  // Reflex game phase management
+  useEffect(() => {
+    if (miniGameActive && miniGameType === 'reflex' && miniGameData?.phase === 'waiting') {
+      // Generate random grid symbols
+      const symbols = Object.keys(SYMBOLS) as SymbolName[];
+      const gridSymbols = Array.from({ length: 9 }, () => symbols[Math.floor(Math.random() * symbols.length)]);
+      
+      setMiniGameData(prev => prev ? {
+        ...prev,
+        gridSymbols,
+        phase: 'ready'
+      } : null);
+
+      // Wait random time (2-5 seconds) then show target
+      const waitTime = 2000 + Math.random() * 3000;
+      setTimeout(() => {
+        if (miniGameData?.targetSymbol) {
+          // Place target symbol in random position
+          const targetPosition = Math.floor(Math.random() * 9);
+          const newGridSymbols = [...gridSymbols];
+          newGridSymbols[targetPosition] = miniGameData.targetSymbol;
+          
+          setMiniGameData(prev => prev ? {
+            ...prev,
+            gridSymbols: newGridSymbols,
+            phase: 'active',
+            startTime: Date.now(),
+            targetAppeared: true
+          } : null);
+        }
+      }, waitTime);
+    }
+  }, [miniGameActive, miniGameType, miniGameData?.phase]);
+
   const completeMiniGame = useCallback((score: number) => {
     setMiniGameScore(score);
     setShowMiniGameResult(true);
     setMiniGameActive(false);
 
+    // Calculate sophisticated bonus based on score and game type
+    const calculateBonus = (score: number, gameType: 'memory' | 'reflex' | 'sequence'): number => {
+      const baseMultiplier = {
+        memory: 0.5,   // Memory games give up to 50% bonus
+        reflex: 0.3,   // Reflex games give up to 30% bonus  
+        sequence: 0.4  // Sequence games give up to 40% bonus
+      };
+
+      const perfectionBonus = score >= 95 ? 1.2 : 1.0; // 20% extra for near-perfect scores
+      const difficultyMultiplier = gameType === 'memory' ? 1.1 : gameType === 'reflex' ? 1.2 : 1.0;
+      
+      return (score / 100) * baseMultiplier[gameType] * perfectionBonus * difficultyMultiplier;
+    };
+
+    const bonusMultiplier = calculateBonus(score, miniGameType);
+    const bonusPayout = lastWin * bonusMultiplier;
+
+    // Apply bonus to last win if there was one
+    if (lastWin > 0 && bonusMultiplier > 0) {
+      setLastWin(prev => prev + bonusPayout);
+      showToastMessage(
+        `Mini-game bonus: +${bonusPayout.toFixed(4)} GOR (${(bonusMultiplier * 100).toFixed(1)}% bonus)!`, 
+        'success'
+      );
+    } else if (score > 50) {
+      // Even without a win, good mini-game performance gives small reward
+      const consolationPayout = betAmount * 0.1 * (score / 100);
+      setLastWin(prev => prev + consolationPayout);
+      showToastMessage(
+        `Mini-game reward: +${consolationPayout.toFixed(4)} GOR!`, 
+        'info'
+      );
+    }
+
     setTimeout(() => {
       setShowMiniGameResult(false);
-    }, 2000);
-  }, []);
+    }, 3000); // Show result longer to display bonus info
+  }, [miniGameType, lastWin, betAmount, showToastMessage]);
 
   // Progressive Jackpot functions
   const updateJackpots = useCallback((betAmount: number) => {
@@ -334,16 +482,23 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
     return false;
   }, [startMiniGame]);
 
+  // Enhanced toast notification helper
+  const showToastMessage = useCallback((message: string, type: 'success' | 'error' | 'warning' | 'info') => {
+    setToastMessage(message);
+    setToastType(type);
+    setShowToast(true);
+  }, []);
+
   const handleSpin = async () => {
     if (!isConnected) {
-      setError('Please connect your wallet first');
+      showToastMessage('Please connect your wallet first', 'warning');
       return;
     }
 
-    if (isSpinning) return;
+    if (isSpinning || isLoading) return;
 
     if (balance < betAmount) {
-      setError('Insufficient balance');
+      showToastMessage('Insufficient balance for this bet', 'error');
       return;
     }
 
@@ -394,6 +549,23 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
       if (onSpin) {
         // Use blockchain spin
         spinResult = await onSpin(betAmount);
+        
+        // Refresh balance after successful spin
+        if (onBalanceRefresh) {
+          try {
+            await onBalanceRefresh();
+          } catch (balanceError) {
+            console.warn('Failed to refresh balance:', balanceError);
+            // Don't fail the spin if balance refresh fails
+          }
+        }
+        
+        // Show success toast for successful spins
+        if (spinResult.payout > 0) {
+          showToastMessage(`Won ${spinResult.payout.toFixed(4)} GOR!`, 'success');
+        } else {
+          showToastMessage('Spin completed - Better luck next time!', 'info');
+        }
       } else {
         // Fallback to local simulation with skill bonuses
         const symbols: [number, number, number] = [
@@ -417,7 +589,14 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
           payout = basePayout;
         }
 
-        spinResult = { symbols, payout };
+        // Create SpinResult object matching the interface
+        spinResult = { 
+          symbols, 
+          payout,
+          txSignature: 'local-simulation',
+          timestamp: Date.now(),
+          betAmount: betAmount
+        };
       }
 
       setTimeout(() => {
@@ -438,6 +617,9 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
         // Determine final payout (jackpot overrides regular payout)
         const finalPayout = jackpotPayout > 0 ? jackpotPayout : spinResult.payout;
 
+        // Record spin in RTP monitor
+        rtpMonitor.recordSpin(betAmount, finalPayout);
+
         if (finalPayout > 0) {
           setLastWin(finalPayout);
           setWinningLines([1]); // Only middle row (index 1) is the payline
@@ -454,7 +636,16 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
     } catch (error) {
       clearInterval(animationInterval);
       console.error('Spin error:', error);
-      setError(error instanceof Error ? error.message : 'Spin failed');
+      
+      // Handle GameError vs regular Error
+      if (error && typeof error === 'object' && 'userMessage' in error) {
+        // This is a GameError from the enhanced error handling
+        setError((error as GameError).userMessage);
+      } else {
+        // Fallback for regular errors
+        setError(error instanceof Error ? error.message : 'Spin failed');
+      }
+      
       setIsSpinning(false);
     }
   };
@@ -470,6 +661,9 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
   const titleShadowStyle = (color: string) => ({
     textShadow: `0 0 15px ${color}, 0 2px 2px rgba(0,0,0,0.7)`
   });
+
+  // Show initialization prompt in main game area when needed
+  const showInlineInitPrompt = isConnected && isInitialized === false;
 
   return (
     <div className="flex items-center justify-center min-h-screen text-white p-2 antialiased" style={{ fontFamily: "'Exo 2', sans-serif" }}>
@@ -495,6 +689,19 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
           </div>
         )}
 
+        {/* Inline Initialization Prompt */}
+        {showInlineInitPrompt && onInitialize && (
+          <InlineInitializationPrompt
+            isLoading={isLoading}
+            error={initializationError || ''}
+            onInitialize={onInitialize}
+            balance={balance}
+          />
+        )}
+
+        {/* Main Game Content - Only show when initialized or not connected */}
+        {(!isConnected || isInitialized === true || isInitialized === null) && (
+          <>
         {/* Header */}
         <header>
           <div className="flex justify-between items-center text-yellow-400 font-bold px-2">
@@ -690,88 +897,207 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                 </div>
 
                 {/* Memory Game */}
-                {miniGameType === 'memory' && miniGameData && miniGameData.sequence && miniGameData.playerSequence && miniGameData.currentIndex !== undefined && (
+                {miniGameType === 'memory' && miniGameData && miniGameData.sequence && (
                   <div className="space-y-4">
-                    <div className="text-center text-sm text-gray-400">
-                      Sequence: {miniGameData.currentIndex + 1} / {miniGameData.sequence.length}
-                    </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      {Object.keys(SYMBOLS).map((symbolName) => (
-                        <button
-                          key={symbolName}
-                          onClick={() => {
-                            if (!miniGameData?.sequence || !miniGameData?.playerSequence) return;
-                            const newPlayerSequence = [...miniGameData.playerSequence, symbolName as SymbolName];
-                            const isCorrect = newPlayerSequence[newPlayerSequence.length - 1] === miniGameData.sequence[newPlayerSequence.length - 1];
+                    {/* Show Phase */}
+                    {miniGameData.phase === 'show' && (
+                      <div className="space-y-4">
+                        <div className="text-center text-sm text-yellow-400 font-bold">
+                          Watch the sequence!
+                        </div>
+                        <div className="text-center text-xs text-gray-400">
+                          Showing: {(miniGameData.showIndex || 0)} / {miniGameData.sequence.length}
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 min-h-[120px]">
+                          {miniGameData.sequence.map((symbolName, index) => (
+                            <div
+                              key={index}
+                              className={`p-3 rounded-lg border-2 transition-all duration-300 ${
+                                index < (miniGameData.showIndex || 0)
+                                  ? 'border-green-400 bg-green-400/20 scale-105'
+                                  : index === (miniGameData.showIndex || 0) - 1
+                                  ? 'border-yellow-400 bg-yellow-400/30 scale-110 animate-pulse'
+                                  : 'border-slate-600 bg-slate-700/50'
+                              }`}
+                            >
+                              {index < (miniGameData.showIndex || 0) && (
+                                <img
+                                  src={SYMBOLS[symbolName].img}
+                                  alt={symbolName}
+                                  className="w-8 h-8 object-contain mx-auto"
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
-                            if (isCorrect && newPlayerSequence.length === miniGameData.sequence.length) {
-                              completeMiniGame(100); // Perfect score
-                            } else if (!isCorrect) {
-                              completeMiniGame(Math.max(0, (newPlayerSequence.length - 1) * 25)); // Partial score
-                            } else {
-                              setMiniGameData({
-                                ...miniGameData,
-                                playerSequence: newPlayerSequence,
-                                currentIndex: newPlayerSequence.length
-                              });
-                            }
-                          }}
-                          className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-                        >
-                          <img
-                            src={SYMBOLS[symbolName as SymbolName].img}
-                            alt={symbolName}
-                            className="w-8 h-8 object-contain mx-auto"
-                          />
-                        </button>
-                      ))}
-                    </div>
-                    <div className="text-center text-xs text-gray-500">
-                      Target: {miniGameData.sequence.slice(0, miniGameData.currentIndex + 1).map((s: SymbolName, i: number) => (
-                        <span key={i} className="inline-block mx-1">
-                          {SYMBOLS[s]?.name || s}
-                        </span>
-                      ))}
-                    </div>
+                    {/* Input Phase */}
+                    {miniGameData.phase === 'input' && (
+                      <div className="space-y-4">
+                        <div className="text-center text-sm text-cyan-400 font-bold">
+                          Repeat the sequence!
+                        </div>
+                        <div className="text-center text-xs text-gray-400">
+                          Progress: {(miniGameData.playerSequence || []).length} / {miniGameData.sequence.length}
+                        </div>
+                        
+                        {/* Player's current sequence */}
+                        <div className="grid grid-cols-4 gap-2 mb-4">
+                          {miniGameData.sequence.map((_, index) => (
+                            <div
+                              key={index}
+                              className={`p-3 rounded-lg border-2 transition-all duration-300 ${
+                                index < (miniGameData.playerSequence || []).length
+                                  ? 'border-green-400 bg-green-400/20'
+                                  : 'border-slate-600 bg-slate-700/50'
+                              }`}
+                            >
+                              {index < (miniGameData.playerSequence || []).length && (
+                                <img
+                                  src={SYMBOLS[(miniGameData.playerSequence || [])[index]].img}
+                                  alt={(miniGameData.playerSequence || [])[index]}
+                                  className="w-8 h-8 object-contain mx-auto"
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Symbol selection buttons */}
+                        <div className="grid grid-cols-4 gap-2">
+                          {Object.keys(SYMBOLS).map((symbolName) => (
+                            <button
+                              key={symbolName}
+                              onClick={() => {
+                                if (!miniGameData?.sequence || !miniGameData?.playerSequence) return;
+                                
+                                const currentIndex = miniGameData.playerSequence.length;
+                                const expectedSymbol = miniGameData.sequence[currentIndex];
+                                const isCorrect = symbolName === expectedSymbol;
+                                
+                                if (isCorrect) {
+                                  const newPlayerSequence = [...miniGameData.playerSequence, symbolName as SymbolName];
+                                  
+                                  if (newPlayerSequence.length === miniGameData.sequence.length) {
+                                    // Completed successfully
+                                    completeMiniGame(100);
+                                  } else {
+                                    // Continue with next symbol
+                                    setMiniGameData({
+                                      ...miniGameData,
+                                      playerSequence: newPlayerSequence
+                                    });
+                                  }
+                                } else {
+                                  // Wrong symbol - end game with partial score
+                                  const score = Math.max(0, (miniGameData.playerSequence.length / miniGameData.sequence.length) * 100);
+                                  completeMiniGame(score);
+                                }
+                              }}
+                              className="p-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition-all duration-200 hover:scale-105 active:scale-95"
+                            >
+                              <img
+                                src={SYMBOLS[symbolName as SymbolName].img}
+                                alt={symbolName}
+                                className="w-8 h-8 object-contain mx-auto"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {/* Reflex Game */}
-                {miniGameType === 'reflex' && miniGameData && miniGameData.targetSymbol && miniGameData.startTime !== undefined && (
+                {miniGameType === 'reflex' && miniGameData && miniGameData.targetSymbol && (
                   <div className="space-y-4">
                     <div className="text-center">
                       <div className="text-lg font-bold text-yellow-400 mb-2">
                         Click when you see:
                       </div>
-                      <img
-                        src={SYMBOLS[miniGameData.targetSymbol]?.img}
-                        alt={miniGameData.targetSymbol}
-                        className="w-16 h-16 object-contain mx-auto mb-4"
-                      />
+                      <div className="bg-slate-700 rounded-lg p-4 mb-4">
+                        <img
+                          src={SYMBOLS[miniGameData.targetSymbol]?.img}
+                          alt={miniGameData.targetSymbol}
+                          className="w-16 h-16 object-contain mx-auto"
+                        />
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {Array.from({ length: 9 }, (_, i) => {
-                        const randomSymbol = Object.keys(SYMBOLS)[Math.floor(Math.random() * Object.keys(SYMBOLS).length)] as SymbolName;
-                        const isTarget = Math.random() < 0.3 && randomSymbol === miniGameData.targetSymbol;
-                        return (
-                          <button
-                            key={i}
-                            onClick={() => {
-                              if (miniGameData?.startTime === undefined || !miniGameData?.targetSymbol) return;
-                              const reactionTime = Date.now() - miniGameData.startTime;
-                              const score = isTarget ? Math.max(0, 100 - (reactionTime / 10)) : 0;
-                              completeMiniGame(score);
-                            }}
-                            className="p-3 bg-slate-700 hover:bg-slate-600 rounded-lg transition-colors"
-                          >
-                            <img
-                              src={SYMBOLS[isTarget && miniGameData.targetSymbol ? miniGameData.targetSymbol : randomSymbol]?.img}
-                              alt={isTarget && miniGameData.targetSymbol ? miniGameData.targetSymbol : randomSymbol}
-                              className="w-8 h-8 object-contain mx-auto"
-                            />
-                          </button>
-                        );
-                      })}
+
+                    {/* Waiting Phase */}
+                    {miniGameData.phase === 'waiting' && (
+                      <div className="text-center text-cyan-400 font-bold animate-pulse">
+                        Get ready...
+                      </div>
+                    )}
+
+                    {/* Ready Phase */}
+                    {miniGameData.phase === 'ready' && (
+                      <div className="text-center text-yellow-400 font-bold animate-pulse">
+                        Watch carefully...
+                      </div>
+                    )}
+
+                    {/* Game Grid */}
+                    {(miniGameData.phase === 'ready' || miniGameData.phase === 'active') && miniGameData.gridSymbols && (
+                      <div className="grid grid-cols-3 gap-2">
+                        {miniGameData.gridSymbols.map((symbolName, i) => {
+                          const isTargetSymbol = symbolName === miniGameData.targetSymbol && miniGameData.targetAppeared;
+                          return (
+                            <button
+                              key={i}
+                              onClick={() => {
+                                if (miniGameData?.phase !== 'active' || !miniGameData?.startTime) return;
+                                
+                                const reactionTime = Date.now() - miniGameData.startTime;
+                                
+                                if (isTargetSymbol) {
+                                  // Correct target clicked - calculate score based on reaction time
+                                  // Perfect reaction (under 500ms) = 100%, gets worse over time
+                                  const maxTime = 2000; // 2 seconds max for decent score
+                                  const score = Math.max(10, 100 - (reactionTime / maxTime) * 90);
+                                  completeMiniGame(Math.round(score));
+                                } else {
+                                  // Wrong symbol clicked - low score
+                                  completeMiniGame(5);
+                                }
+                              }}
+                              disabled={miniGameData.phase !== 'active'}
+                              className={`p-3 rounded-lg transition-all duration-200 ${
+                                miniGameData.phase === 'active'
+                                  ? isTargetSymbol
+                                    ? 'bg-red-600 hover:bg-red-500 animate-pulse border-2 border-red-400'
+                                    : 'bg-slate-700 hover:bg-slate-600'
+                                  : 'bg-slate-800 cursor-not-allowed'
+                              }`}
+                            >
+                              <img
+                                src={SYMBOLS[symbolName]?.img}
+                                alt={symbolName}
+                                className={`w-8 h-8 object-contain mx-auto transition-all duration-200 ${
+                                  isTargetSymbol ? 'scale-110' : ''
+                                }`}
+                              />
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Status indicator */}
+                    <div className="text-center text-sm">
+                      {miniGameData.phase === 'waiting' && (
+                        <div className="text-gray-400">Preparing game...</div>
+                      )}
+                      {miniGameData.phase === 'ready' && (
+                        <div className="text-yellow-400">Target will appear soon...</div>
+                      )}
+                      {miniGameData.phase === 'active' && (
+                        <div className="text-red-400 font-bold animate-pulse">CLICK THE TARGET NOW!</div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -789,16 +1115,31 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
           {/* Mini-Game Result */}
           {showMiniGameResult && (
             <div className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none">
-              <div className="bg-gradient-to-r from-purple-600 to-pink-600 rounded-xl p-6 text-center animate-bounce">
+              <div className={`rounded-xl p-6 text-center animate-bounce border-2 ${
+                miniGameScore >= 90 ? 'bg-gradient-to-r from-green-600 to-emerald-600 border-green-400' :
+                miniGameScore >= 70 ? 'bg-gradient-to-r from-blue-600 to-cyan-600 border-blue-400' :
+                miniGameScore >= 50 ? 'bg-gradient-to-r from-yellow-600 to-orange-600 border-yellow-400' :
+                'bg-gradient-to-r from-red-600 to-pink-600 border-red-400'
+              }`}>
                 <div className="text-2xl font-bold text-white mb-2">
-                  BONUS COMPLETE!
+                  {miniGameScore >= 90 ? '🏆 EXCELLENT!' :
+                   miniGameScore >= 70 ? '🎯 GREAT JOB!' :
+                   miniGameScore >= 50 ? '👍 GOOD TRY!' :
+                   '💪 KEEP TRYING!'}
                 </div>
-                <div className="text-lg text-yellow-300">
+                <div className="text-lg text-yellow-300 mb-2">
                   Score: {miniGameScore}%
                 </div>
                 <div className="text-sm text-gray-200">
-                  Payout Bonus: +{(miniGameScore / 100 * 0.5).toFixed(2)}x
+                  {miniGameType === 'memory' && 'Memory Challenge'}
+                  {miniGameType === 'reflex' && 'Reflex Challenge'}
+                  {miniGameType === 'sequence' && 'Sequence Challenge'}
                 </div>
+                {miniGameScore >= 95 && (
+                  <div className="text-xs text-yellow-200 mt-2 animate-pulse">
+                    ⭐ Perfect Score Bonus Applied! ⭐
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -898,8 +1239,16 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
           </div>
 
           <div className="flex items-center justify-between text-yellow-400 px-1">
-            <div className="text-center border-2 border-fuchsia-500/80 rounded-lg p-2 w-20 h-12 flex items-center justify-center cursor-pointer hover:bg-fuchsia-500/20 transition-colors">
-              <span className="uppercase font-bold text-xs tracking-wider">Menu</span>
+            <div className="flex gap-2">
+              <div className="text-center border-2 border-fuchsia-500/80 rounded-lg p-2 w-20 h-12 flex items-center justify-center cursor-pointer hover:bg-fuchsia-500/20 transition-colors">
+                <span className="uppercase font-bold text-xs tracking-wider">Menu</span>
+              </div>
+              <button
+                onClick={() => setShowRTPAnalyzer(true)}
+                className="text-center border-2 border-purple-500/80 rounded-lg p-2 w-20 h-12 flex items-center justify-center cursor-pointer hover:bg-purple-500/20 transition-colors"
+              >
+                <span className="uppercase font-bold text-xs tracking-wider">RTP</span>
+              </button>
             </div>
 
             <div className="flex-grow flex flex-col items-center">
@@ -942,10 +1291,10 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
             <div className="relative">
               <button
                 onClick={handleSpin}
-                disabled={isSpinning || !isConnected || balance < betAmount}
-                aria-label={isSpinning ? 'Spinning...' : 'Spin the reels'}
+                disabled={isSpinning || isLoading || !isConnected || balance < betAmount}
+                aria-label={isSpinning ? 'Spinning...' : isLoading ? 'Processing...' : 'Spin the reels'}
                 className={`relative w-20 h-20 rounded-full font-black text-lg uppercase transition-all duration-300 transform ${
-                  isSpinning
+                  isSpinning || isLoading
                     ? 'bg-gradient-to-b from-orange-500 to-red-700 text-white shadow-[0_8px_20px_rgba(255,165,0,0.6)] animate-pulse scale-110'
                     : !isConnected || balance < betAmount
                       ? 'bg-gradient-to-b from-gray-600 to-gray-800 text-gray-400 cursor-not-allowed shadow-[0_4px_10px_rgba(0,0,0,0.3)]'
@@ -957,6 +1306,11 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
                     <div className="animate-spin text-2xl mb-1">⟳</div>
                     <div className="text-xs font-bold">SPINNING</div>
                   </div>
+                ) : isLoading ? (
+                  <div className="flex flex-col items-center">
+                    <div className="animate-spin text-2xl mb-1">⚙️</div>
+                    <div className="text-xs font-bold">PROCESSING</div>
+                  </div>
                 ) : (
                   <div className="flex flex-col items-center">
                     <span className="text-xl mb-1">🎰</span>
@@ -966,18 +1320,62 @@ export const BlockchainSlotGame: React.FC<BlockchainSlotGameProps> = ({
               </button>
 
               {/* Pulsing ring effect when ready to spin */}
-              {!isSpinning && isConnected && balance >= betAmount && (
+              {!isSpinning && !isLoading && isConnected && balance >= betAmount && (
                 <div className="absolute inset-0 rounded-full border-2 border-cyan-400/50 animate-ping"></div>
               )}
 
               {/* Loading indicator */}
-              {isSpinning && (
+              {(isSpinning || isLoading) && (
                 <div className="absolute inset-0 rounded-full border-2 border-orange-400/50 animate-spin border-t-transparent"></div>
               )}
             </div>
           </div>
         </footer>
       </div>
+
+      {/* Error Display */}
+      <ErrorDisplay
+        error={currentError}
+        onRetry={() => {
+          if (onClearError) onClearError();
+          // Retry the last operation if it was a spin
+          if (currentError?.type && ['TRANSACTION_ERROR', 'NETWORK_ERROR'].includes(currentError.type)) {
+            handleSpin();
+          }
+        }}
+        onDismiss={onClearError}
+        showTechnicalDetails={process.env.NODE_ENV === 'development'}
+      />
+
+      {/* Loading Overlay */}
+      <LoadingOverlay
+        isLoading={isLoading && !isSpinning}
+        message={
+          isLoading ? 'Processing transaction...' : 'Loading...'
+        }
+        onCancel={() => {
+          // Cancel functionality could be added here if needed
+          console.log('User requested to cancel operation');
+        }}
+      />
+
+        </>
+        )}
+
+      {/* Toast Notifications */}
+      <Toast
+        message={toastMessage}
+        type={toastType}
+        isVisible={showToast}
+        onDismiss={() => setShowToast(false)}
+        duration={3000}
+      />
+
+      {/* RTP Analyzer */}
+      <RTPAnalyzer
+        isVisible={showRTPAnalyzer}
+        onClose={() => setShowRTPAnalyzer(false)}
+      />
     </div>
   );
 };

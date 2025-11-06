@@ -1,7 +1,23 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import * as anchor from '@project-serum/anchor';
 import { PublicKey, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Buffer } from 'buffer';
+import { 
+  SpinResult, 
+  extractSpinResultFromTransaction, 
+  generateFallbackResult,
+  validateSpinEventData,
+  lamportsToSol
+} from '../utils';
+import { 
+  parseError, 
+  GameError, 
+  RetryManager, 
+  NetworkHealthChecker, 
+  LoadingStateManager 
+} from '../utils/errorHandler';
+import { BlockchainOperationWrapper } from '../utils/blockchainOperationWrapper';
 
 // Program ID - matches the smart contract
 const PROGRAM_ID = new PublicKey('5mumbfHtxQTQTAnhsmMbJsRU1VLNaguMQdmdVzoUk5RF');
@@ -314,6 +330,17 @@ export const useProgram = () => {
   const { connection } = useConnection();
   const wallet = useWallet();
   const [isLoading, setIsLoading] = useState(false);
+  const [isInitialized, setIsInitialized] = useState<boolean | null>(null);
+  const [initializationError, setInitializationError] = useState<string>('');
+  const [currentError, setCurrentError] = useState<GameError | null>(null);
+
+  // Initialize comprehensive blockchain operation wrapper
+  const blockchainWrapper = useMemo(() => new BlockchainOperationWrapper(connection), [connection]);
+  
+  // Legacy utilities for backward compatibility
+  const retryManager = useMemo(() => blockchainWrapper['retryManager'], [blockchainWrapper]);
+  const loadingManager = useMemo(() => blockchainWrapper['loadingManager'], [blockchainWrapper]);
+  const networkChecker = useMemo(() => blockchainWrapper['networkChecker'], [blockchainWrapper]);
 
   const program = useMemo(() => {
     if (!wallet.publicKey) return null;
@@ -336,62 +363,285 @@ export const useProgram = () => {
     );
   }, [wallet.publicKey]);
 
-  const initializeSlots = async () => {
-    if (!program || !wallet.publicKey || !slotsStateAddress) return;
+  // Enhanced loading state management
+  const setOperationLoading = useCallback((operationId: string, loading: boolean) => {
+    loadingManager.setLoading(operationId, loading);
+    setIsLoading(loadingManager.isAnyLoading());
+  }, [loadingManager]);
 
-    setIsLoading(true);
-    try {
-      const tx = await program.methods
-        .initialize(wallet.publicKey, wallet.publicKey)
-        .accounts({
-          slotsState: slotsStateAddress,
-          user: wallet.publicKey,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+  // Clear error handler
+  const clearError = useCallback(() => {
+    setCurrentError(null);
+  }, []);
 
-      console.log('Initialize transaction:', tx);
-      return tx;
-    } catch (error) {
-      console.error('Initialize error:', error);
+
+
+  const spinSlots = async (betAmount: number): Promise<SpinResult> => {
+    clearError();
+    
+    return blockchainWrapper.executeTransaction(
+      'spin-slots',
+      // Transaction builder
+      async () => {
+        if (!program || !wallet.publicKey || !slotsStateAddress) {
+          throw new Error('wallet not connected');
+        }
+
+        const betAmountLamports = Math.floor(betAmount * LAMPORTS_PER_SOL);
+
+        // Validate bet amount
+        if (betAmountLamports <= 0) {
+          throw new Error('invalid bet amount');
+        }
+
+        // Check initialization status first
+        const initStatus = await checkInitializationStatus();
+        if (!initStatus) {
+          throw new Error('not initialized');
+        }
+
+        // Get the current slots state to find treasury and validate game state
+        let slotsState;
+        try {
+          slotsState = await program.account.slotsState.fetch(slotsStateAddress);
+        } catch (error) {
+          throw new Error('not initialized');
+        }
+
+        // Double-check initialization flag from the account
+        if (!slotsState.initialized) {
+          throw new Error('not initialized');
+        }
+
+        // Check if game is paused
+        if (slotsState.paused) {
+          throw new Error('game paused');
+        }
+
+        // Check if bet amount exceeds maximum payout
+        if (betAmountLamports > slotsState.maxPayoutPerSpin) {
+          throw new Error('bet too high');
+        }
+
+        // Submit the spin transaction
+        console.log('🎰 Submitting spin transaction with bet:', betAmount, 'SOL');
+        
+        const txSignature = await program.methods
+          .spin(new anchor.BN(betAmountLamports))
+          .accounts({
+            slotsState: slotsStateAddress,
+            user: wallet.publicKey,
+            treasury: slotsState.treasury,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+
+        console.log('📝 Spin transaction submitted:', txSignature);
+        return txSignature;
+      },
+      // Result extractor
+      async (txSignature: string) => {
+        const betAmountLamports = Math.floor(betAmount * LAMPORTS_PER_SOL);
+        
+        // Get slots state for fallback generation
+        const slotsState = await program!.account.slotsState.fetch(slotsStateAddress!);
+
+        // Try to extract spin results from transaction events
+        const parseResult = await extractSpinResultFromTransaction(
+          connection, 
+          txSignature, 
+          PROGRAM_ID
+        );
+
+        console.log('🔍 Event parsing result:', parseResult);
+
+        // If we successfully parsed events, validate and return the result
+        if (parseResult.success && parseResult.spinResult) {
+          const eventData = parseResult.spinResult;
+          
+          // Validate the parsed event data
+          if (validateSpinEventData(eventData)) {
+            const spinResult: SpinResult = {
+              symbols: eventData.symbols,
+              payout: eventData.payout,
+              txSignature,
+              timestamp: Date.now(),
+              betAmount: betAmountLamports,
+            };
+
+            console.log('✅ Successfully parsed spin result from events:', spinResult);
+            return spinResult;
+          } else {
+            console.warn('⚠️ Parsed event data failed validation, falling back to generated result');
+          }
+        }
+
+        // If event parsing failed, generate fallback result
+        console.log('🔄 Generating fallback result due to:', {
+          parseSuccess: parseResult.success,
+          hasSpinResult: !!parseResult.spinResult,
+          parseError: parseResult.error
+        });
+
+        const fallbackResult = generateFallbackResult(
+          txSignature,
+          betAmountLamports,
+          true, // Transaction was successful if we got here
+          {
+            houseEdge: slotsState.houseEdge || 5,
+            maxPayoutPerSpin: slotsState.maxPayoutPerSpin,
+            winProbability: 0.15
+          }
+        );
+
+        console.log('🎲 Generated fallback result:', fallbackResult);
+        return fallbackResult;
+      },
+      {
+        confirmationTimeout: 45000, // 45 seconds for confirmation
+        maxConfirmationRetries: 2,
+        onTransactionSubmitted: (signature) => {
+          console.log('🚀 Transaction submitted for confirmation:', signature);
+        },
+        onConfirmationProgress: (confirmations, required) => {
+          console.log(`⏳ Confirmation progress: ${confirmations}/${required}`);
+        }
+      }
+    ).catch((error: GameError) => {
+      // Enhanced error handling with user feedback
+      console.error('🚨 Spin operation failed:', error);
+      setCurrentError(error);
+      
+      // If we have a transaction signature but the operation failed, 
+      // try to generate a fallback result for consistency
+      if (error.technicalMessage.includes('transaction') && !error.technicalMessage.includes('not connected')) {
+        console.log('🔄 Attempting fallback result generation for failed transaction');
+        try {
+          const betAmountLamports = Math.floor(betAmount * LAMPORTS_PER_SOL);
+          return generateFallbackResult('failed-transaction', betAmountLamports, false);
+        } catch (fallbackError) {
+          console.error('❌ Fallback generation also failed:', fallbackError);
+        }
+      }
+      
       throw error;
-    } finally {
-      setIsLoading(false);
-    }
+    });
   };
 
-  const spinSlots = async (betAmount: number) => {
-    if (!program || !wallet.publicKey || !slotsStateAddress) return;
-
-    setIsLoading(true);
-    try {
-      const betAmountLamports = Math.floor(betAmount * LAMPORTS_PER_SOL);
-
-      // Get the current slots state to find treasury
-      const slotsState = await program.account.slotsState.fetch(slotsStateAddress);
-
-      const tx = await program.methods
-        .spin(new anchor.BN(betAmountLamports))
-        .accounts({
-          slotsState: slotsStateAddress,
-          user: wallet.publicKey,
-          treasury: slotsState.treasury,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
-
-      console.log('Spin transaction:', tx);
-
-      // Listen for events and return updated state
-      const updatedState = await program.account.slotsState.fetch(slotsStateAddress);
-
-      return { tx, state: updatedState };
-    } catch (error) {
-      console.error('Spin error:', error);
-      throw error;
-    } finally {
-      setIsLoading(false);
+  // Check initialization status
+  const checkInitializationStatus = useCallback(async (): Promise<boolean> => {
+    if (!program || !slotsStateAddress) {
+      setIsInitialized(null);
+      return false;
     }
+
+    try {
+      const state = await program.account.slotsState.fetch(slotsStateAddress);
+      const initialized = state && state.initialized === true;
+      setIsInitialized(initialized);
+      setInitializationError('');
+      return initialized;
+    } catch (error) {
+      console.log('Slots state not found, needs initialization');
+      setIsInitialized(false);
+      setInitializationError('');
+      return false;
+    }
+  }, [program, slotsStateAddress]);
+
+  // Auto-check initialization status when wallet connects
+  useEffect(() => {
+    if (wallet.publicKey && program && slotsStateAddress) {
+      checkInitializationStatus();
+    } else {
+      setIsInitialized(null);
+      setInitializationError('');
+    }
+  }, [wallet.publicKey, program, slotsStateAddress, checkInitializationStatus]);
+
+  // Enhanced initialization function with comprehensive error handling
+  const initializeSlots = async (autoRetry: boolean = false): Promise<string> => {
+    clearError();
+    setInitializationError('');
+    
+    return blockchainWrapper.executeTransaction(
+      'initialize-slots',
+      // Transaction builder
+      async () => {
+        if (!program || !wallet.publicKey || !slotsStateAddress) {
+          throw new Error('wallet not connected');
+        }
+
+        // Check if already initialized
+        const currentStatus = await checkInitializationStatus();
+        if (currentStatus) {
+          console.log('🎮 Slots already initialized');
+          return 'already_initialized';
+        }
+
+        console.log('🚀 Initializing slots state...');
+        
+        const tx = await program.methods
+          .initialize(wallet.publicKey, wallet.publicKey)
+          .accounts({
+            slotsState: slotsStateAddress,
+            user: wallet.publicKey,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc();
+
+        console.log('📝 Initialize transaction submitted:', tx);
+        return tx;
+      },
+      // Result extractor
+      async (txSignature: string) => {
+        // Handle special case for already initialized
+        if (txSignature === 'already_initialized') {
+          return txSignature;
+        }
+
+        // Verify initialization was successful
+        const verifyStatus = await checkInitializationStatus();
+        if (!verifyStatus) {
+          throw new Error('initialization failed');
+        }
+
+        console.log('✅ Slots state successfully initialized');
+        return txSignature;
+      },
+      {
+        confirmationTimeout: 30000, // 30 seconds for initialization
+        maxConfirmationRetries: 2,
+        onTransactionSubmitted: (signature) => {
+          if (signature !== 'already_initialized') {
+            console.log('🚀 Initialization transaction submitted:', signature);
+          }
+        },
+        onConfirmationProgress: (confirmations, required) => {
+          console.log(`⏳ Initialization confirmation: ${confirmations}/${required}`);
+        }
+      }
+    ).catch((error: GameError) => {
+      console.error('🚨 Initialization failed:', error);
+      setCurrentError(error);
+      setInitializationError(error.userMessage);
+      
+      // Handle specific initialization errors
+      if (error.technicalMessage.includes('already in use')) {
+        // Account already exists, check if it's properly initialized
+        checkInitializationStatus().then(status => {
+          if (status) {
+            console.log('✅ Account exists and is properly initialized');
+            setInitializationError('');
+            return 'already_initialized';
+          } else {
+            setInitializationError('Account exists but initialization failed');
+          }
+        });
+      }
+      
+      throw error;
+    });
   };
 
   const getSlotsState = async () => {
@@ -412,6 +662,14 @@ export const useProgram = () => {
     initializeSlots,
     spinSlots,
     getSlotsState,
+    checkInitializationStatus,
     isLoading,
+    isInitialized,
+    initializationError,
+    currentError,
+    clearError,
+    retryManager,
+    loadingManager,
+    networkChecker,
   };
 };

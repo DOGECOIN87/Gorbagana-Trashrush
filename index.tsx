@@ -8,6 +8,7 @@ import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { DesktopSlotGame } from './src/components/DesktopSlotGame.tsx';
 import { BlockchainSlotGame } from './src/components/BlockchainSlotGame.tsx';
+import { InitializationPrompt } from './src/components/InitializationPrompt.tsx';
 import { WalletContextProvider } from './src/hooks/useWallet.tsx';
 import { useProgram } from './src/hooks/useProgram.tsx';
 import { ErrorBoundary } from './src/components/ErrorBoundary.tsx';
@@ -18,7 +19,16 @@ const AppContent: React.FC = () => {
   const { publicKey, connected } = useWallet();
   const [balance, setBalance] = useState(0);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 1024);
-  const { spinSlots, getSlotsState, isLoading } = useProgram();
+  const { 
+    spinSlots, 
+    getSlotsState, 
+    initializeSlots,
+    checkInitializationStatus,
+    isLoading, 
+    isInitialized, 
+    initializationError 
+  } = useProgram();
+  const [showInitPrompt, setShowInitPrompt] = useState(false);
 
   // Handle screen size changes
   useEffect(() => {
@@ -49,10 +59,49 @@ const AppContent: React.FC = () => {
     getBalance();
   }, [publicKey, connection]);
 
+  // Handle initialization status changes
+  useEffect(() => {
+    // Only show modal prompt if we're on desktop or if inline prompt is not available
+    // The inline prompt is now the primary initialization method
+    if (connected && isInitialized === false && window.innerWidth < 1024) {
+      // Show modal initialization prompt only on mobile where inline might not be as visible
+      setShowInitPrompt(true);
+    } else if (isInitialized === true) {
+      // Hide prompt when initialization is complete
+      setShowInitPrompt(false);
+    } else {
+      // Hide modal on desktop since we have inline prompt
+      setShowInitPrompt(false);
+    }
+  }, [connected, isInitialized]);
+
+  // Handle initialization
+  const handleInitialize = async () => {
+    try {
+      const result = await initializeSlots(true); // Enable auto-retry
+      if (result === 'already_initialized' || result) {
+        setShowInitPrompt(false);
+        // Refresh balance after initialization
+        if (publicKey && connection) {
+          const newBalanceLamports = await connection.getBalance(publicKey);
+          setBalance(newBalanceLamports / LAMPORTS_PER_SOL);
+        }
+      }
+    } catch (error) {
+      console.error('Initialization failed:', error);
+      // Error is already handled in the useProgram hook and displayed in the prompt
+    }
+  };
+
   // Real spin function that interacts with blockchain
   const handleSpin = async (betAmount: number): Promise<{ symbols: [number, number, number], payout: number }> => {
     if (!connected || !publicKey) {
       throw new Error('Wallet not connected');
+    }
+
+    // Check if game is initialized before spinning
+    if (isInitialized === false) {
+      throw new Error('Game not initialized. Please initialize the game first.');
     }
 
     try {
@@ -66,10 +115,10 @@ const AppContent: React.FC = () => {
       const newBalanceLamports = await connection.getBalance(publicKey);
       setBalance(newBalanceLamports / LAMPORTS_PER_SOL);
 
-      // Return the spin result
+      // Return the spin result - the SpinResult interface has symbols and payout directly
       return {
-        symbols: result.state.symbols,
-        payout: result.state.payout / LAMPORTS_PER_SOL
+        symbols: result.symbols,
+        payout: result.payout / LAMPORTS_PER_SOL
       };
     } catch (error) {
       console.error('Spin error:', error);
@@ -99,6 +148,15 @@ const AppContent: React.FC = () => {
         {isDesktop ? '🖥️ Desktop Mode' : '📱 Mobile Mode'} | Width: {window.innerWidth}px
       </div>
 
+      {/* Initialization Prompt */}
+      <InitializationPrompt
+        isVisible={showInitPrompt}
+        isLoading={isLoading}
+        error={initializationError}
+        onInitialize={handleInitialize}
+        onCancel={() => setShowInitPrompt(false)}
+      />
+
       {/* Main Game Component */}
       <DesktopSlotGame
         isConnected={connected}
@@ -110,6 +168,9 @@ const AppContent: React.FC = () => {
           onSpin={handleSpin}
           isConnected={connected}
           balance={balance}
+          isInitialized={isInitialized}
+          onInitialize={handleInitialize}
+          initializationError={initializationError}
         />
       </DesktopSlotGame>
     </div>
