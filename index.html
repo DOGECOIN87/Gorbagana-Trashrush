@@ -9,16 +9,34 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/index.css">
     <style>
       body {
         font-family: 'Exo 2', sans-serif;
         margin: 0;
         padding: 0;
       }
+      
+      /* Ensure Tailwind classes work */
+      .bg-blue-500 { background-color: rgb(59 130 246); }
+      .text-white { color: rgb(255 255 255); }
+      .p-4 { padding: 1rem; }
+      
+      /* Critical animations for the game */
+      @keyframes particleFloat {
+        0% { transform: translateY(0px) translateX(0px) scale(1); opacity: 1; }
+        100% { transform: translateY(-80px) translateX(-10px) scale(0.8); opacity: 0; }
+      }
+      
+      @keyframes winFlash-mega {
+        0% { opacity: 0; transform: scale(0.8); }
+        50% { opacity: 0.6; transform: scale(1.12); }
+        100% { opacity: 0; transform: scale(1); }
+      }
     </style>
-    <script type="module" crossorigin src="/Gorbagana-Trashrush/assets/index-DnB9erdM.js"></script>
   </head>
   <body>
     <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
   </body>
 </html>
