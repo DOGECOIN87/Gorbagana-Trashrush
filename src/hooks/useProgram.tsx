@@ -396,44 +396,63 @@ export const useProgram = () => {
 
         // Check initialization status first
         const initStatus = await checkInitializationStatus();
+        let treasury = null;
+        const preInstructions = [];
+
         if (!initStatus) {
-          throw new Error('not initialized');
+          console.log('⚠️ User not initialized - Auto-initializing in same transaction bundle');
+          
+          // Construct initialize instruction
+          const initIx = await program.methods
+            .initialize(wallet.publicKey, wallet.publicKey)
+            .accounts({
+              slotsState: slotsStateAddress,
+              user: wallet.publicKey,
+              systemProgram: SystemProgram.programId,
+            })
+            .instruction();
+            
+          preInstructions.push(initIx);
+          // For a fresh initialization, we set treasury to the user's wallet
+          treasury = wallet.publicKey;
+        } else {
+           // Get the current slots state
+           try {
+             const slotsState = await program.account.slotsState.fetch(slotsStateAddress);
+             
+             // Check if game is paused
+             if (slotsState.paused) {
+               throw new Error('game paused');
+             }
+     
+             // Check if bet amount exceeds maximum payout
+             if (betAmountLamports > slotsState.maxPayoutPerSpin) {
+               throw new Error('bet too high');
+             }
+             
+             treasury = slotsState.treasury;
+           } catch (error) {
+             // Fallback if fetch fails strangely but status said initialized
+             console.warn('Failed to fetch state despite init status true', error);
+             // Potentially re-init? Assuming if fetch fails we might need to re-init?
+             // For now let's assume if fetch fails we treat it as not initialized?
+             // But we are in the 'else' block.
+             throw error;
+           }
         }
 
-        // Get the current slots state to find treasury and validate game state
-        let slotsState;
-        try {
-          slotsState = await program.account.slotsState.fetch(slotsStateAddress);
-        } catch (error) {
-          throw new Error('not initialized');
-        }
-
-        // Double-check initialization flag from the account
-        if (!slotsState.initialized) {
-          throw new Error('not initialized');
-        }
-
-        // Check if game is paused
-        if (slotsState.paused) {
-          throw new Error('game paused');
-        }
-
-        // Check if bet amount exceeds maximum payout
-        if (betAmountLamports > slotsState.maxPayoutPerSpin) {
-          throw new Error('bet too high');
-        }
-
-        // Submit the spin transaction
-        console.log('🎰 Submitting spin transaction with bet:', betAmount, 'SOL');
+        // Submit the spin transaction (with optional init prepended)
+        console.log('🎰 Submitting spin transaction with bet:', betAmount, 'SOL', preInstructions.length > 0 ? '(Auto-init included)' : '');
         
         const txSignature = await program.methods
           .spin(new anchor.BN(betAmountLamports))
           .accounts({
             slotsState: slotsStateAddress,
             user: wallet.publicKey,
-            treasury: slotsState.treasury,
+            treasury: treasury,
             systemProgram: SystemProgram.programId,
           })
+          .preInstructions(preInstructions)
           .rpc();
 
         console.log('📝 Spin transaction submitted:', txSignature);
